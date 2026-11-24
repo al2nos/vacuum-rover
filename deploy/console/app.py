@@ -115,7 +115,8 @@ def on_message(client, _u, msg):
                     "type": "scan", "node": node, **st["scan"]})
             # скаляры скана (rpm, rate_hz, потери) — как обычные метрики
             for metric, value in payload.items():
-                if metric in ("ts", "r") or not isinstance(value, (int, float)):
+                if metric in ("ts", "r", "start", "step") \
+                        or not isinstance(value, (int, float)):
                     continue
                 st["metrics"][metric] = value
             return
