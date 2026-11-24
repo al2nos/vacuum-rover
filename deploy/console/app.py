@@ -5,12 +5,16 @@
 раздаёт live-данные в браузер по WebSocket, публикует команды
 телеуправления и конфигурации обратно в MQTT.
 
+Секреты: переменная окружения ROVER_MQTT_PASS (systemd EnvironmentFile
+/opt/rover-console/.env на VDS). В репозиторий — никогда.
+
 Деплой на VDS: /opt/rover-console (venv + systemd rover-console.service),
 nginx проксирует /console/ → 127.0.0.1:8080.
 См. протокол: docs/protocol.md
 """
 import asyncio
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -24,10 +28,10 @@ from fastapi.staticfiles import StaticFiles
 BASE = Path(__file__).resolve().parent
 DB_PATH = BASE / "data" / "rover.db"
 STATIC = BASE / "static"
-MQTT_HOST = "10.77.0.1"
+MQTT_HOST = os.environ.get("ROVER_MQTT_HOST", "10.77.0.1")
 MQTT_PORT = 1883
 MQTT_USER = "console"
-MQTT_PASS = "taDKznBcQaOh66R9"
+MQTT_PASS = os.environ.get("ROVER_MQTT_PASS", "")
 RETENTION_DAYS = 7
 ONLINE_TIMEOUT = 15.0
 
