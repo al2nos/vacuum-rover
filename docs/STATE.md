@@ -37,7 +37,7 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
   Дашборд / Пульт) и футер со ссылкой на GitHub и AGENTS.md.
 - `deploy/README.md`: сборка, выкладка на VDS, сниппет nginx
   (HTTP→HTTPS, HSTS, WebSocket для /console/).
-- Проверено локально: `python deploy/build_site.py docs dist` — 12 файлов,
+- Проверено локально: `python deploy/build_site.py docs dist` — 13 файлов,
   pandoc 3.14, exit 0. Таблица протокола в `/kb/protocol.html` рендерится
   корректно (ложная тревога прошлого аудита снята).
 
