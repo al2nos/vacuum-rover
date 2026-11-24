@@ -13,8 +13,10 @@
       перед RX Tinker Board 2) — человек
 4. [ ] Подключение к Tinker Board 2: TX → RX UART, GND, питание с шины
 5. [ ] Порт декодера протокола 0x11/0x13 (Python, по мотивам kaiaai/LDS
-      и delta_2a_pi.py) — можно писать без железа на эмуляторе пакетов
-6. [ ] Визуализация скана: простейший polar-plot / RViz2
+      и delta_2a_pi.py) — можно писать без железа на эмуляторе пакетов.
+      Писать сразу в форме ROS-ноды (rclpy → sensor_msgs/LaserScan),
+      публикация в MQTT-консоль делается параллельно тем же сканом
+6. [ ] Визуализация скана: простейший polar-plot / RViz2 / пульт
 7. [ ] Публикация sensor_msgs/LaserScan через rclpy
 8. [ ] Разбор полётов: частота потерь пакетов, стабильность оборотов
 
@@ -28,13 +30,50 @@
 - [ ] Замеры колёсных модулей ×4 (человек) → CAD адаптеров → печать
 - [ ] Схема распиновки колёс → драйвер моторов на Tinker Board 2
 - [ ] Электрика: батарея → выключатель → BTS7960 + buck 5 В
-- [ ] Первый выезд: телеуправление по Wi-Fi
+- [ ] Первый выезд: телеуправление (MQTT-пульт уже готов, см. ниже)
 
-## Этап 3 — восприятие и автономия
+## Этап 3 — ROS 2 Jazzy + Nav2 (автономия)
 
-- [ ] Стереокамера (варианты: 2×USB / OAK-D Lite — см. docs/vision.md)
-- [ ] SLAM (slam_toolbox), одометрия + IMU
-- [ ] Навигация
+Стек навигации — только бортовой, на Tinker Board 2. VDS его не
+крутит (380 МБ RAM) — сайт общается с ровером через rosbridge.
+
+1. [ ] Tinker Board 2: Armbian Ubuntu 24.04 Server (образ tinkerboard-2,
+       ядро 6.12) → ROS 2 Jazzy из apt (arm64 Tier 1). Осторожно:
+       конфликт libzstd на свежем Noble — лечится даунгрейдом пакета
+2. [ ] Пакеты: ros-jazzy-ros-base, navigation2, slam-toolbox,
+       rosbridge-suite
+3. [ ] Дожим 2 ГБ RAM: zram/swap, ROS_LOCALHOST_ONLY=1, CycloneDDS
+4. [ ] Драйвер лидара как ROS-нода: UART Delta-2C PRO → LaserScan
+5. [ ] Base controller: /cmd_vel (Twist) → GPIO/PWM BTS7960, watchdog
+       0.5 с. Приоритет: автономка > MQTT-телеоп (cmd_vel перекрывает)
+6. [ ] URDF + статическая tf base_link→laser (после замеров башни)
+7. [ ] slam_toolbox: онлайн-карта → сохранение, разбор поведения
+8. [ ] VDS: nginx location /rosbridge/ → ws://10.77.0.11:9090
+       (WS-прокси к rosbridge на Тинкере, почти ноль RAM)
+9. [ ] Консоль: вкладка «Навигация» (roslibjs, рендер в браузере):
+       /map + /amcl_pose + /plan, клик по карте → /navigate_to_pose
+10. [ ] Прогоны: автономная езда по квартире, сбор проблем
+
+Риск: Nav2 + SLAM + декодер на 2 ГБ — впритык. План Б: Nav2 перенести
+на Zero 2 W (4 ГБ, слабее CPU — Nav2 ок, SLAM тяжелее), Тинкер оставить
+на лидарах и стерео.
+
+## Инфраструктура (готово, сессия 2026-11-24)
+
+- [x] VDS 3dlb.ru: WireGuard-хаб 10.77.0.0/24, сайт под basic auth,
+      peers tinker→10.77.0.11, opi3→10.77.0.12 (/usr/local/bin/make-peer.sh)
+- [x] Сайт-зеркало базы знаний: /kb/ + /stages/, генератор
+      deploy/build_site.py, альбомная вёрстка, ссылка на пульт в меню
+- [x] rover-console (/console/): MQTT → FastAPI+SQLite → WebSocket,
+      карточки узлов, графики по каждому датчику (30 мин + live),
+      карта лидара (canvas, затухающий след), активность датчиков,
+      джойстик teleop, редактор конфигурации (retained config/set)
+- [x] node-agent (deploy/node-agent/): телеметрия 1 Гц + LWT + проброс
+      сканов из $ROVER_SCAN_FILE в telemetry/lidar
+- [x] Протокол docs/protocol.md: топики, формат сканов {start,step,r},
+      границы MQTT/ROS 2/rosbridge
+- [x] Проверка end-to-end эмулятором (fake_publisher): сканы → карта,
+      метрики → графики, LWT → online/offline
 
 ## Бюджет допокупок
 
