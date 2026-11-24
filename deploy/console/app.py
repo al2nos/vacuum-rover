@@ -3,7 +3,9 @@
 
 Принимает телеметрию узлов по MQTT, хранит историю в SQLite,
 раздаёт live-данные в браузер по WebSocket, публикует команды
-телеуправления и конфигурации обратно в MQTT.
+телеуправления и конфигурации обратно в MQTT. Сканы лидара хранит
+только последние (в SQLite — скаляры), считает активность датчиков
+и шлёт сканы в браузер по WebSocket.
 
 Секреты: переменная окружения ROVER_MQTT_PASS (systemd EnvironmentFile
 /opt/rover-console/.env на VDS). В репозиторий — никогда.
@@ -18,6 +20,7 @@ import os
 import sqlite3
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
@@ -53,12 +56,26 @@ db.commit()
 nodes: dict = {}          # name -> {online, last_seen, metrics:{}, config}
 ws_clients: set = set()
 loop: asyncio.AbstractEventLoop | None = None
+SCAN_RATE_WINDOW = 30.0   # окно подсчёта частоты сообщений, сек
 
 
 def node_state(name):
     return nodes.setdefault(
         name, {"online": False, "last_seen": 0.0,
-               "metrics": {}, "config": None})
+               "metrics": {}, "config": None,
+               "scan": None,            # последний скан лидара {r,start,step,...}
+               "msgs": {},              # source -> deque timestamps
+               "last_scan_sent": 0.0})
+
+
+def msg_rate(st, source):
+    q = st["msgs"].get(source)
+    if not q:
+        return 0.0
+    now = time.time()
+    while q and q[0] < now - SCAN_RATE_WINDOW:
+        q.popleft()
+    return round(len(q) / SCAN_RATE_WINDOW, 2)
 
 
 # --- mqtt ---
@@ -79,6 +96,28 @@ def on_message(client, _u, msg):
         try:
             payload = json.loads(msg.payload)
         except ValueError:
+            return
+        # учёт активности по источникам (system / lidar / ...)
+        q = st["msgs"].setdefault(name, deque())
+        q.append(now)
+        if name == "lidar" and isinstance(payload.get("r"), list):
+            # полный скан: храним последний, в SQLite не пишем (только счётчики)
+            st["scan"] = {"r": payload["r"],
+                          "start": float(payload.get("start", 0.0)),
+                          "step": float(payload.get("step", 1.0)),
+                          "rpm": payload.get("rpm"),
+                          "t": now}
+            st["last_seen"] = now
+            st["online"] = True
+            if loop and now - st["last_scan_sent"] > 0.12:  # ~8 сканов/с макс
+                st["last_scan_sent"] = now
+                loop.call_soon_threadsafe(broadcast, {
+                    "type": "scan", "node": node, **st["scan"]})
+            # скаляры скана (rpm, rate_hz, потери) — как обычные метрики
+            for metric, value in payload.items():
+                if metric in ("ts", "r") or not isinstance(value, (int, float)):
+                    continue
+                st["metrics"][metric] = value
             return
         for metric, value in payload.items():
             if metric == "ts" or not isinstance(value, (int, float)):
@@ -142,8 +181,14 @@ def api_nodes():
     out = []
     for name, st in nodes.items():
         online = st["online"] and now - st["last_seen"] < ONLINE_TIMEOUT
+        scan = st["scan"]
         out.append({"name": name, "online": online,
-                    "last_seen": st["last_seen"], **st["metrics"]})
+                    "last_seen": st["last_seen"],
+                    "sys_hz": msg_rate(st, "system"),
+                    "lidar_hz": msg_rate(st, "lidar"),
+                    "scan_points": len(scan["r"]) if scan else 0,
+                    "scan_age": round(now - scan["t"], 1) if scan else None,
+                    **st["metrics"]})
     return JSONResponse(out)
 
 
