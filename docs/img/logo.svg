@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161b22"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#g)" stroke="#21262d" stroke-width="2"/>
+  <!-- lidar sweep arcs -->
+  <g fill="none" stroke="#58a6ff" stroke-width="2" opacity="0.35">
+    <path d="M64 64 L118 36"/>
+    <path d="M64 64 L112 92"/>
+    <circle cx="110" cy="34" r="3" fill="#58a6ff" stroke="none"/>
+    <circle cx="104" cy="94" r="3" fill="#58a6ff" stroke="none"/>
+    <circle cx="26" cy="30" r="3" fill="#58a6ff" stroke="none" opacity="0.5"/>
+  </g>
+  <!-- rover body: skid-steer chassis -->
+  <rect x="34" y="52" width="60" height="42" rx="10" fill="#1f6feb" stroke="#58a6ff" stroke-width="2"/>
+  <!-- lidar turret -->
+  <circle cx="64" cy="64" r="13" fill="#0d1117" stroke="#3fb950" stroke-width="3"/>
+  <circle cx="64" cy="64" r="4" fill="#3fb950"/>
+  <!-- wheels -->
+  <g fill="#21262d" stroke="#8b949e" stroke-width="2">
+    <rect x="24" y="56" width="12" height="18" rx="4"/>
+    <rect x="24" y="76" width="12" height="18" rx="4"/>
+    <rect x="92" y="56" width="12" height="18" rx="4"/>
+    <rect x="92" y="76" width="12" height="18" rx="4"/>
+  </g>
+</svg>
