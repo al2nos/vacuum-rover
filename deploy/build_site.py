@@ -10,7 +10,8 @@
 
 Вёрстка — альбомная: широкая колонка (до 1380 px), текст в колонке
 ~820 px, таблицы и код на всю ширину, списки в две колонки на широком
-экране, индекс KB — сетка карточек.
+экране, индекс KB — сетка карточек. В меню всех страниц — ссылка
+на пульт /console/.
 """
 import pathlib
 import subprocess
@@ -77,6 +78,7 @@ TEMPLATE = """<!DOCTYPE html>
     <a href="/stages/">Этапы</a>
     <a href="/kb/">База знаний</a>
     <a href="/dashboard/">Дашборд</a>
+    <a href="/console/"><b>Пульт</b></a>
   </nav>
 </div></header>
 <article><div class="wrap">
