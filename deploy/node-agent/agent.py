@@ -3,7 +3,9 @@
 
 Ставится на узлы ровера (Tinker Board 2 и др.).
 Креды брокера: env ROVER_MQTT_USER / ROVER_MQTT_PASS (по умолчанию
-user = имя узла). См. протокол: docs/protocol.md
+user = имя узла). Сканы лидара пробрасывает из $ROVER_SCAN_FILE
+(по умолчанию /run/rover/scan.json, пишет локальный декодер).
+См. протокол: docs/protocol.md
 """
 import json
 import os
@@ -16,11 +18,13 @@ NODE = os.environ.get("ROVER_NODE", "tinker")
 BROKER = os.environ.get("ROVER_BROKER", "10.77.0.1")
 USER = os.environ.get("ROVER_MQTT_USER", NODE)
 PASS = os.environ.get("ROVER_MQTT_PASS", "")
+SCAN_FILE = os.environ.get("ROVER_SCAN_FILE", "/run/rover/scan.json")
 TELE_PERIOD = 1.0
 TELEOP_TIMEOUT = 0.5
 
 config = {}
 last_teleop = 0.0
+_scan_mtime = 0.0
 
 
 def read_temp():
@@ -76,6 +80,17 @@ while True:
         "ts": time.time(),
     }
     client.publish(f"rover/{NODE}/telemetry/system", json.dumps(tele))
+    # проброс скана лидара: декодер пишет {start,step,rpm,r:[mm...]} в SCAN_FILE
+    try:
+        mtime = os.path.getmtime(SCAN_FILE)
+        if mtime != _scan_mtime:
+            with open(SCAN_FILE) as f:
+                scan = json.load(f)
+            scan["r"] = [int(v) for v in scan["r"]]
+            client.publish(f"rover/{NODE}/telemetry/lidar", json.dumps(scan))
+            _scan_mtime = mtime
+    except (OSError, ValueError, KeyError):
+        pass
     if time.time() - last_teleop > TELEOP_TIMEOUT:
         pass  # здесь позже: стоп моторов при потере телеуправления
     time.sleep(TELE_PERIOD)
