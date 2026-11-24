@@ -64,6 +64,8 @@
       peers tinker→10.77.0.11, opi3→10.77.0.12 (/usr/local/bin/make-peer.sh)
 - [x] Сайт-зеркало базы знаний: /kb/ + /stages/, генератор
       deploy/build_site.py, альбомная вёрстка, ссылка на пульт в меню
+- [x] Лендинг и дашборд генерируются из deploy/site.json, /kb/state.html,
+      robots.txt, единая шапка/футер (issue #1, 2026-11-25)
 - [x] rover-console (/console/): MQTT → FastAPI+SQLite → WebSocket,
       карточки узлов, графики по каждому датчику (30 мин + live),
       карта лидара (canvas, затухающий след), активность датчиков,
