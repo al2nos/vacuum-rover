@@ -9,7 +9,7 @@
 | Топик | Направление | QoS | Retain | Содержимое (JSON) |
 |---|---|---|---|---|
 | `rover/<node>/telemetry/system` | узел → все | 0 | нет | `{"cpu": %, "mem": %, "temp": °C, "uptime": ч, "ts": epoch}` |
-| `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | статистика: `{"rate_hz": , "packets_ok": , "packets_lost": , "rpm": }` |
+| `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | статистика: `{"speed_hz": , "rpm": , "packets_ok": , "packets_bad": , "frames_meas": , "scan_age": }` |
 | `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | **скан:** `{"start": °, "step": °, "rpm": , "r": [мм,…]}` — см. ниже |
 | `rover/<node>/status` | узел (LWT) | 0 | **да** | `online` / `offline` (last will) |
 | `rover/<node>/cmd/teleop` | пульт → узел | 0 | нет | `{"vx": м/с, "wz": рад/с, "ts": epoch}` |
@@ -46,10 +46,13 @@
 ## Мост «декодер → консоль» на узле
 
 Агент узла (`deploy/node-agent/agent.py`) пробрасывает сканы от
-локального декодера: декодер пишет JSON со сканом в файл
-`$ROVER_SCAN_FILE` (по умолчанию `/run/rover/scan.json`), агент
-при изменении файла публикует его в `telemetry/lidar`. Телеметрия
-системы и телеуправление работают независимо от лидара.
+локального декодера `deploy/node-agent/lidar_delta.py`: декодер пишет JSON
+со сканом в файл `$ROVER_SCAN_FILE` (по умолчанию `/run/rover/scan.json`),
+агент при изменении файла публикует его в `telemetry/lidar` (опрос 20 Гц,
+публикация до ~8/с). Скалярная статистика пишется декодером в
+`$ROVER_LIDAR_STATS` (`speed_hz`, `rpm`, `packets_ok`, `packets_bad`,
+`frames_meas`, `frames_speed`, `scan_age`) и публикуется раз в секунду.
+Телеметрия системы и телеуправление работают независимо от лидара.
 
 ## Границы с ROS 2 / Nav2 (этап 3)
 

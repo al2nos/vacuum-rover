@@ -1,9 +1,9 @@
 {
   "repo": "https://github.com/al2nos/vacuum-rover",
   "status": {
-    "stage": "этап 0",
-    "title": "подъём первого лидара",
-    "detail": "Delta-2C PRO → LaserScan в RViz"
+    "stage": "этап 0 · готово",
+    "title": "первый лидар в строю",
+    "detail": "Delta-2A (2C PRO) → MQTT → живая карта на пульте, 5 Гц / 360 точек"
   },
   "hero": {
     "title": "4WD-ровер из двух мёртвых пылесосов",
@@ -65,8 +65,8 @@
       "name": "Tinker Board 2 — rover-a",
       "role": "лидара, стерео, ROS 2, навигация",
       "ip": "10.77.0.11",
-      "state": "waiting",
-      "note": "ожидает: установка Ubuntu, make-peer.sh"
+      "state": "online",
+      "note": "лидар 5 Гц, агент и декодер активны"
     },
     {
       "name": "Orange Pi 3 — шлюз",
