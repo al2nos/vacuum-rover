@@ -26,7 +26,7 @@ h2{font-size:16px;margin:24px 0 12px;color:var(--dim);text-transform:uppercase;l
 .mrow b{font-weight:600;color:var(--text)}
 .muted{color:var(--dim)}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px}
-.chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;position:relative;overflow:hidden}
 .chartbox h4{font-size:12px;color:var(--dim);margin-bottom:6px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
 .row{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
@@ -69,6 +69,16 @@ table.act th{color:var(--dim);font-weight:500;font-size:12px}
     <div class="panel">
       <canvas id="map" width="520" height="520"></canvas>
       <p class="muted" style="text-align:center;margin-top:8px" id="mapInfo">сканов нет — запустите лидар узла (telemetry/lidar, поле r)</p>
+      <div style="margin-top:10px;text-align:center">
+        <label class="muted" for="mapRange">Масштаб карты (видимое расстояние):</label>
+        <select id="mapRange" style="margin-left:6px">
+          <option value="2000">2 м</option>
+          <option value="4000">4 м</option>
+          <option value="6000">6 м</option>
+          <option value="8000" selected>8 м</option>
+          <option value="10000">10 м</option>
+        </select>
+      </div>
     </div>
     <div class="panel" style="flex:0 0 300px">
       <h4 style="margin-bottom:10px">Активность датчиков</h4>
@@ -211,7 +221,7 @@ connect();
 
 /* --- карта лидара --- */
 const map = $('#map'), mctx = map.getContext('2d');
-const MAP_R = 260, RANGE_MM = 8000;   // видимое окно: ±8 м
+const MAP_R = 260; let RANGE_MM = 8000;   // видимое окно (мм): ±8 м
 let scans = [];                        // [{r,start,step,t}] — след, 8 сканов
 function pushScan(m){
   scans.push(m);
@@ -254,6 +264,10 @@ function drawMap(){
   mctx.closePath(); mctx.fill();
 }
 drawMap();
+$('#mapRange').addEventListener('change', function(){
+  RANGE_MM = parseInt(this.value, 10);
+  drawMap();
+});
 
 /* --- активность датчиков --- */
 async function refreshActivity(){
