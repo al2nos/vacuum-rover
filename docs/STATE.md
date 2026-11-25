@@ -61,7 +61,20 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
   `lidar_hz` ≈ 6, `scan_points` 360, `scan_age` 0.1, `rpm` 300,
   `packets_bad` 0.
 
-`site-sync: done` (2026-11-25, вечер).
+**`site-sync: done` (2026-11-25, вечер).**
+
+### Сессия 2026-11-25 (позднее) — фиксы пульт / консоль
+
+- Агент не поднимался корректно после ручного запуска (`nohup`): без env
+  из `/etc/rover/agent.env` MQTT-пароль пустой → отклонение
+  `disconnected, not authorised`. Лечение: `sudo systemctl start
+  rover-agent.service`.
+- После старта агента консоль показывает `tinker True 6.07 0.1 360`.
+- Масштаб карты лидара добавлен (`#mapRange`, 2–10 м → `RANGE_MM`).
+- Графики: исправлен overflow (`.chartbox { position: relative; overflow: hidden }`).
+- **Итог:** лидара живого скана на сайте **нет** — консоль отдаёт live.
+
+`site-sync: done` (2026-11-25, вечер, позднее).
 
 Известное:
 
