@@ -1,0 +1,11 @@
+[Unit]
+Description=Rover LiDAR ROS2 node (Delta scan -> /scan LaserScan)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/env bash -c "source /opt/ros/lyrical/setup.bash && exec python3 /opt/rover-agent/lidar_ros/lidar_node.py"
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

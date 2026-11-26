@@ -1,0 +1,11 @@
+[Unit]
+Description=ROSBridge for rover lidar/map topics
+After=network.target rover_lidar_ros.service slam_toolbox.service
+
+[Service]
+ExecStart=/usr/bin/env bash -c "source /opt/ros/lyrical/setup.bash && exec ros2 run rosbridge_server rosbridge_websocket"
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

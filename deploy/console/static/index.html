@@ -207,6 +207,14 @@ function connect(){
       if(m.node === selected) pushScan(m);
       return;
     }
+    if(m.type === 'map'){
+      if(m.node === selected) pushMap(m);
+      return;
+    }
+    if(m.type === 'log'){
+      if(m.node === selected) log('[ROS] ' + (m.line || ''));
+      return;
+    }
     if(m.type !== 'metric') return;
     if(m.node !== selected || !hist[m.metric]) return;
     const h = hist[m.metric];
@@ -223,6 +231,7 @@ connect();
 const map = $('#map'), mctx = map.getContext('2d');
 const MAP_R = 260; let RANGE_MM = 8000;   // видимое окно (мм): ±8 м
 let scans = [];                        // [{r,start,step,t}] — след, 8 сканов
+let slamMap = null;                    // последняя SLAM-карта {data, info}
 function pushScan(m){
   scans.push(m);
   if(scans.length > 8) scans.shift();
@@ -230,8 +239,32 @@ function pushScan(m){
   const pts = m.r.filter(v => v > 0).length;
   $('#mapInfo').textContent = `${m.r.length} лучей · ${pts} отражений · rpm ${m.rpm ?? '—'}`;
 }
+function pushMap(m){
+  slamMap = {data: m.data || [], info: m.info || {}};
+  drawMap();
+}
+function drawGrid(){
+  const data = slamMap.data || [], info = slamMap.info || {};
+  const w = info.width || 0, h = info.height || 0;
+  const res = info.resolution || 0.005;
+  const origin = info.origin || {x: 0, y: 0};
+  if(!w || !h || !data.length) return;
+  const k = MAP_R / (RANGE_MM / 2);   // px per meter
+  for(let i = 0; i < data.length; i++){
+    const v = Number(data[i]);
+    if(!(v > 50)) continue;          // occupied cells
+    const cx = i % w, cy = Math.floor(i / w);
+    const wx = (origin.x || 0) + (cx - w / 2) * res;
+    const wy = (origin.y || 0) + (cy - h / 2) * res;
+    const x = MAP_R + wx * k, y = MAP_R - wy * k;
+    if(x < -5 || x > MAP_R + RANGE_MM/2 + 5 || y < -5 || y > MAP_R + RANGE_MM/2 + 5) continue;
+    mctx.fillStyle = '#f85149';
+    mctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+  }
+}
 function drawMap(){
   mctx.clearRect(0,0,520,520);
+  if(slamMap && slamMap.data && slamMap.data.length) drawGrid();
   const k = MAP_R / RANGE_MM;         // мм -> px
   // сетка: кольца каждый метр + оси
   mctx.strokeStyle = '#21262d'; mctx.lineWidth = 1;

@@ -1,0 +1,11 @@
+[Unit]
+Description=Async SLAM Toolbox with Delta lidar scan
+After=network.target rover_lidar_ros.service
+
+[Service]
+ExecStart=/usr/bin/env bash -c "source /opt/ros/lyrical/setup.bash && exec ros2 launch slam_toolbox online_async_launch.py"
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -64,6 +64,7 @@ def node_state(name):
         name, {"online": False, "last_seen": 0.0,
                "metrics": {}, "config": None,
                "scan": None,            # последний скан лидара {r,start,step,...}
+               "map": None,             # последняя SLAM-карта {data, info}
                "msgs": {},              # source -> deque timestamps
                "last_scan_sent": 0.0})
 
@@ -119,6 +120,20 @@ def on_message(client, _u, msg):
                         or not isinstance(value, (int, float)):
                     continue
                 st["metrics"][metric] = value
+            return
+        if name == "map":
+            st["map"] = {"data": payload.get("data") or [], "info": payload.get("info") or {}}
+            st["online"] = True
+            if loop:
+                loop.call_soon_threadsafe(broadcast, {
+                    "type": "map", "node": node,
+                    "data": st["map"]["data"], "info": st["map"]["info"]})
+            return
+        if name == "log":
+            line = str(payload.get("line") or "")
+            if loop:
+                loop.call_soon_threadsafe(broadcast, {
+                    "type": "log", "node": node, "line": line})
             return
         for metric, value in payload.items():
             if metric == "ts" or not isinstance(value, (int, float)):

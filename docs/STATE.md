@@ -76,6 +76,9 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 
 `site-sync: done` (2026-11-25, вечер, позднее).
 
+`site-sync: done` (2026-11-26 — этап 3: 13 файлов выложены в
+`/var/www/rover/`, все страницы и `/console/` — HTTP 200).
+
 Известное:
 
 - После перезагрузки Тинкера приём мог не подниматься сам — проверено,
@@ -195,6 +198,28 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 | D15 | 2026-11-25 | Мотор первого лидара — 3.3 В постоянно (без ШИМ) | Даёт 5 Гц и стабильные `0xAD`; 5 В = 8 Гц, только `0xAE` |
 | D16 | 2026-11-25 | Декодер и агент — отдельные systemd-юниты на Тинкере | Лидар падает/перезапускается независимо от телеметрии; сканы идут потоком |
 | D17 | 2026-11-25 | `ExecStartPre` с unbind/bind `dw-apb-uart` в юните лидара | gpiolib-вмешательство оставляет UART0 в режиме GPIO; rebind возвращает приём |
+| D18 | 2026-11-26 | ROS 2 на Тинкере — Lyrical, не Jazzy | Образ Ubuntu 26.04/resolute: jazzy-пакетов нет; образ не меняли по просьбе владельца |
+| D19 | 2026-11-26 | Единый конвейер пульта — MQTT, rosbridge — дополнительно | Консоль уже на MQTT; мост ROS↔MQTT даёт карту/логи/команды без переделки фронтенда |
+| D20 | 2026-11-26 | nginx `/rosbridge/` → `10.77.0.11:9090`, не localhost | rosbridge живёт на Тинкере; `127.0.0.1:9090` на VDS давал 502 |
+
+## Этап 3 (2026-11-26): ROS 2 + SLAM + Nav2 + пульт
+
+- ROS 2 **Lyrical** (не Jazzy — текущий образ Ubuntu 26.04 / resolute) установлен на
+  Тинкере: `ros-lyrical-ros-base`, `navigation2`, `slam-toolbox`, `rosbridge-suite`,
+  `nav2-bringup`.
+- systemd-юниты Тинкера: `rover_lidar_ros` (`/run/rover/scan.json` → `/scan`),
+  `slam_toolbox` (async → `/map`, `use_map_saver=True`, автосейв),
+  `nav2_bringup` (`slam:=True use_localization:=True use_sim_time:=False`),
+  `rosbridge` (`:9090`), `rover_bridge` (ROS↔MQTT).
+- VDS: nginx `/rosbridge/` → `ws://10.77.0.11:9090`, websocket Upgrade → **101**.
+- `rover_bridge`: `/map` → `telemetry/map`, `/odom` → `telemetry/odom`,
+  `/rosout` → `telemetry/log`; MQTT `rover/<node>/cmd/teleop` → ROS `/cmd_vel`.
+- Консоль: broadcast типов `map`/`log` по WebSocket; SLAM-карта рисуется на canvas
+  поверх сканов; журнал показывает ROS-логи. На сайте — `/console/`.
+- `/odom` пока без источника (моторный base controller не подключён) — ожидаемые
+  таймауты TF `base_link → odom` в журнале Nav2.
+- Путь управления: джойстик → `/console/ws` → `rover/<node>/cmd/teleop` →
+  `rover_bridge` → `/cmd_vel` (исполняющего моторного контроллера ещё нет).
 
 ## Открытые вопросы
 
