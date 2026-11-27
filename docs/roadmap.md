@@ -95,6 +95,21 @@ rosbridge.
 - [x] Проверка end-to-end эмулятором (fake_publisher): сканы → карта,
       метрики → графики, LWT → online/offline
 
+## Этап 4 — второй модуль Orange Pi 3 LTS (подготовка, 2026-11-27)
+
+Второй вычислитель в флоте для второго лидара/шлюза (см. `deploy/site.json`,
+`docs/architecture.md`).
+
+1. [x] Юнит `deploy/node-agent/rover-lidar-opos3.service` — декодер на OP3
+       (UART → `/run/rover/scan2.json`) → agent → `telemetry/lidar2`
+2. [ ] Подготовка железа: Orange Pi 3 LTS, SD-карта, питание, UART-кабель
+       от второго лидара (TX/RX/GND), 5 В + мотор
+3. [ ] Установка: Armbian/Ubuntu → venv → paho-mqtt/psutil → lidar_delta +
+       agent; env агента (ROVER_NODE нового узла); enable юнит
+4. [ ] Проверка: второй лидар на OP3 → MQTT → пульт (новый узел в /api/nodes)
+5. [ ] Решение по мотору 2C (PWM+PID ~7 Гц / 2.5 В) — переносится на OP3 при
+       переезде лидара с Tinkera
+
 ## Бюджет допокупок
 
 | Позиция | Комментарий |
