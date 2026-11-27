@@ -60,6 +60,9 @@ class RoverLidarNode(Node):
             self.last_publish_t = time.time()
             self.published += 1
             self.scan_pub.publish(msg)
+        except FileNotFoundError:
+            # скана ещё нет (лидар не подключён) — это норма, не шумим в rosout
+            return
         except Exception as e:
             now = time.time()
             if now - self.last_err_t > 5.0:
