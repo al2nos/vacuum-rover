@@ -20,10 +20,23 @@
 7. [x] Публикация sensor_msgs/LaserScan через rclpy (нода `rover_lidar`, `/scan`)
 8. [ ] Разбор полётов: частота потерь пакетов, стабильность оборотов
 
-## Этап 1 — второй лидар (Delta-2A)
+## Этап 1 — второй лидар (Delta-2C PRO, 360°)
 
-Повторяем весь цикл + добавляем ШИМ 10 кГц с PID до 6 Гц на мотор.
-Критерий: оба скана одновременно в одном RViz, 360° обзор.
+Второй такой же Delta-2C PRO, свободный UART на 40-pin, TX = 3.3 В
+(замер владельца). Критерий: оба скана одновременно в пульте и RViz,
+360° обзор.
+
+1. [x] Включить UART4 на 40-pin: pin 19 = TXD, pin 21 = RXD (GPIO1_B0/A7),
+       3.3 В; `overlays=uart4` в `/boot/armbianEnv.txt` → `/dev/ttyS4`
+2. [x] Второй экземпляр декодера: `rover-lidar2.service`
+       (`ROVER_LIDAR_DEV=/dev/ttyS4`, `/run/rover/scan2.json`,
+       `lidar2_stats.json`)
+3. [x] Агент: `ROVER_LIDAR_EXTRA` → `telemetry/lidar2`
+4. [x] ROS 2: `/scan2` (`frame_id=lidar2`) через `rover_lidar2_ros.service`
+5. [x] Пульт: оба скана на карте разными цветами, частоты по каждому лидару
+6. [ ] Физическая установка башни и замер смещения/поворота лидара №2 —
+       человек (без замера TF `base_link→lidar2` остаётся identity)
+7. [ ] Слияние `/scan` + `/scan2` в costmap Nav2 / SLAM после замера TF
 
 ## Этап 2 — шасси и привод
 

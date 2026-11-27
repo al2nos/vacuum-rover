@@ -204,6 +204,8 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 | D21 | 2026-11-26 | `rover_tf`: `odom→base_link` identity 20 Гц до энкодеров | Без TF SLAM не мог обработать ни один скан; честная заглушка, заменить на одометрию колёс |
 | D22 | 2026-11-26 | Карта в MQTT — только занятые ячейки (`occupied`) | Полный OccupancyGrid — сотни КБ JSON; индексы — ~0.6 КБ, пульту хватает |
 | D23 | 2026-11-27 | У `rover-lidar` нет `After=multi-user.target`, только `network.target` | Иначе цикл `agent → lidar → multi-user → agent`: systemd удалял старт агента при включении |
+| D24 | 2026-11-27 | Второй лидар — UART4 на 40-pin (pin 19 TXD / pin 21 RXD), 3.3 В, `overlays=uart4` | Свободен, не требует USB-адаптера; пины делятся с SPI1, который не используется. TX замерен владельцем — 3.3 В |
+| D25 | 2026-11-27 | Второй скан идёт отдельным топиком `telemetry/lidar2`, в ROS — `/scan2` | Не ломает существующий `/scan`; пульт рисует оба скана. Слияние в costmap — только после замера TF `base_link→lidar2` |
 
 ## Этап 3 (2026-11-26): ROS 2 + SLAM + Nav2 + пульт
 
@@ -248,6 +250,34 @@ WS-поток отдаёт `scan`, `map`, `pose`, `log`, `metric`; `/api/logs` �
 предупреждения `Keepout/SpeedFilter: Filter mask was not received`
 (фильтры Nav2 не настроены, на движение не влияют); нет панели
 lifecycle/целей Nav2 и клика по карте.
+
+## Второй лидар 2026-11-27
+
+Оборудование: второй Delta-2C PRO, тот же протокол. Подключение — свободный
+UART на 40-pin Tinker Board 2:
+
+- **pin 19 — UART4_TXD**, **pin 21 — UART4_RXD** (GPIO1_B0 / GPIO1_A7);
+  уровень TX замерен владельцем — **3.3 В**, делитель не нужен;
+- UART4 делит пины с SPI1 (не используется). Включён через
+  `overlays=uart4` в `/boot/armbianEnv.txt`; после ребута появился
+  `/dev/ttyS4` (`ff370000.serial`, 16550A). Остальные юниты после ребута
+  остались `active`.
+
+Софт (в репозитории):
+
+- `rover-lidar2.service` — второй экземпляр `lidar_delta.py`
+  (`/dev/ttyS4` → `/run/rover/scan2.json`, `lidar2_stats.json`);
+- `agent.py` — `ROVER_LIDAR_EXTRA="lidar2:<scan>:<stats>"` →
+  `rover/<node>/telemetry/lidar2`;
+- `rover_lidar2_ros.service` + `lidar_node.py` (`ROVER_SCAN_TOPIC=/scan2`,
+  `ROVER_SCAN_FRAME=lidar2`, `ROVER_NODE_NAME=rover_lidar2_node`) → `/scan2`;
+- `rover_tf.py` публикует статический `base_link→lidar2` (пока identity);
+- пульт: сканы обоих лидаров на карте (`lidar` — синий, `lidar2` — жёлтый),
+  частоты по каждому в `/api/nodes` (`lidars`).
+
+Ограничение: физическое смещение/поворот второго лидара не замерено —
+TF `base_link→lidar2` остаётся identity, поэтому в costmap Nav2/SLAM
+`/scan2` пока не подмешивается. Пульт показывает его как отдельный слой.
 
 ## Холодная загрузка 2026-11-27 (агент не стартовал)
 

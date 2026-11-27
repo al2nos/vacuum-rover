@@ -68,7 +68,7 @@ table.act th{color:var(--dim);font-weight:500;font-size:12px}
   <div class="row">
     <div class="panel">
       <canvas id="map" width="520" height="520"></canvas>
-      <p class="muted" style="text-align:center;margin-top:8px" id="mapInfo">сканов нет — запустите лидар узла (telemetry/lidar, поле r)</p>
+      <p class="muted" style="text-align:center;margin-top:8px" id="mapInfo">сканов нет — запустите лидар(ы) узла (telemetry/lidar, telemetry/lidar2)</p>
       <div style="margin-top:10px;text-align:center">
         <label class="muted" for="mapRange">Масштаб карты (видимое расстояние):</label>
         <select id="mapRange" style="margin-left:6px">
@@ -178,14 +178,14 @@ const PALETTE = ['#58a6ff','#3fb950','#d29922','#f778ba','#a371f7',
                  '#76e3ea','#ffa657','#e6edf3'];
 /* служебные поля /api/nodes — не датчики */
 const NOT_METRIC = new Set(['name','online','last_seen','sys_hz','lidar_hz',
-                            'scan_points','scan_age']);
+                            'scan_points','scan_age','lidars']);
 
 async function selectNode(name){
   selected = name;
   $('#chartNode').textContent = '— ' + name;
   $('#teleNode').textContent = '(' + name + ')';
   $('#mapNode').textContent = '— ' + name;
-  scans = [];
+  scansBySrc = {};
   slamMap = null; mapStats = '';
   $('#poseInfo').textContent = 'поза: — (ждём /odom)';
   $('#mapInfo').textContent = 'ожидание сканов от ' + name + ' …';
@@ -256,15 +256,28 @@ connect();
 /* --- карта лидара --- */
 const map = $('#map'), mctx = map.getContext('2d');
 const MAP_R = 260; let RANGE_MM = 8000;   // видимое окно (мм): ±8 м
-let scans = [];                        // [{r,start,step,t}] — след, 8 сканов
+let scansBySrc = {};                   // лидар -> [{r,start,step,t}] след, 8 сканов
+const LIDAR_COLORS = {lidar: '#58a6ff', lidar2: '#d29922'};
+function hexA(hex, a){
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a.toFixed(2)})`;
+}
 let slamMap = null;                    // последняя SLAM-карта {data, info}
 let mapStats = '';                     // сводка по SLAM-карте
 function pushScan(m){
-  scans.push(m);
-  if(scans.length > 8) scans.shift();
+  const src = m.source || 'lidar';
+  const arr = scansBySrc[src] || (scansBySrc[src] = []);
+  arr.push(m);
+  if(arr.length > 8) arr.shift();
   drawMap();
-  const pts = m.r.filter(v => v > 0).length;
-  $('#mapInfo').textContent = `${m.r.length} лучей · ${pts} отражений · rpm ${m.rpm ?? '—'}` + (mapStats ? ' · ' + mapStats : '');
+  const parts = [];
+  for(const [name, list] of Object.entries(scansBySrc)){
+    const s = list[list.length - 1];
+    if(!s) continue;
+    const pts = s.r.filter(v => v > 0).length;
+    parts.push(`${name}: ${s.r.length} лучей · ${pts} отр. · ${(s.rpm ?? '—')} rpm`);
+  }
+  $('#mapInfo').textContent = parts.join('  |  ') + (mapStats ? '  |  ' + mapStats : '');
 }
 function pushMap(m){
   slamMap = {occupied: m.occupied || [], data: m.data || [], info: m.info || {}};
@@ -311,19 +324,22 @@ function drawMap(){
   mctx.moveTo(MAP_R,10); mctx.lineTo(MAP_R,510);
   mctx.moveTo(10,MAP_R); mctx.lineTo(510,MAP_R);
   mctx.stroke();
-  // след старых сканов
-  scans.forEach((s, i) => {
-    const a = (i + 1) / scans.length;
-    mctx.fillStyle = i === scans.length - 1 ? '#58a6ff' : `rgba(88,166,255,${(a*0.25).toFixed(2)})`;
-    for(let j = 0; j < s.r.length; j++){
-      const d = s.r[j];
-      if(!d || d > RANGE_MM) continue;
-      const ang = (s.start + j * s.step) * Math.PI / 180;
-      const x = MAP_R + d * k * Math.sin(ang);
-      const y = MAP_R - d * k * Math.cos(ang);
-      mctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
-    }
-  });
+  // след старых сканов — по каждому лидару своим цветом
+  for(const [src, arr] of Object.entries(scansBySrc)){
+    const color = LIDAR_COLORS[src] || '#a371f7';
+    arr.forEach((s, i) => {
+      const a = (i + 1) / arr.length;
+      mctx.fillStyle = i === arr.length - 1 ? color : hexA(color, a * 0.25);
+      for(let j = 0; j < s.r.length; j++){
+        const d = s.r[j];
+        if(!d || d > RANGE_MM) continue;
+        const ang = (s.start + j * s.step) * Math.PI / 180;
+        const x = MAP_R + d * k * Math.sin(ang);
+        const y = MAP_R - d * k * Math.cos(ang);
+        mctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+      }
+    });
+  }
   // ровер — треугольник, нос вверх
   mctx.fillStyle = '#3fb950';
   mctx.beginPath();
@@ -345,9 +361,10 @@ async function refreshActivity(){
   for(const n of ns){
     const tr = document.createElement('tr');
     const age = n.scan_age === null ? '—' : n.scan_age;
+    const l2 = n.lidars && n.lidars.lidar2 ? ` / ${n.lidars.lidar2.hz}` : '';
     tr.innerHTML = `<td><span class="pulse ${n.online?'on':'off'}"></span>${n.name}</td>
       <td>${n.sys_hz ?? 0} msg/s</td>
-      <td>${n.lidar_hz ?? 0} scan/s</td>
+      <td>${n.lidar_hz ?? 0}${l2} scan/s</td>
       <td>${n.scan_points || '—'}</td>
       <td>${age}</td>`;
     tb.appendChild(tr);

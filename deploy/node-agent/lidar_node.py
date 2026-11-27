@@ -14,11 +14,12 @@ from std_msgs.msg import Header
 SCAN_FILE = os.environ.get("ROVER_SCAN_FILE", "/run/rover/scan.json")
 SCAN_TOPIC = os.environ.get("ROVER_SCAN_TOPIC", "/scan")
 FRAME_ID = os.environ.get("ROVER_SCAN_FRAME", "lidar")
+NODE_NAME = os.environ.get("ROVER_NODE_NAME", "rover_lidar_node")
 
 
 class RoverLidarNode(Node):
     def __init__(self):
-        super().__init__("rover_lidar_node")
+        super().__init__(NODE_NAME)
         self.scan_pub = self.create_publisher(LaserScan, SCAN_TOPIC, 10)
         self.timer = self.create_timer(0.05, self.timer_cb)
         self.last_publish_t = 0.0

@@ -1,0 +1,19 @@
+[Unit]
+Description=Rover lidar #2 decoder (UART4 -> /run/rover/scan2.json)
+# UART4 на 40-pin: pin 19 = TXD, pin 21 = RXD (Tinker Board 2).
+# Пины общие с SPI1 — overlay uart4 его отключает (armbianEnv: overlays=uart4).
+After=network.target
+# Без лидара/overlay не крутим рестарты вхолостую.
+ConditionPathExists=/dev/ttyS4
+
+[Service]
+EnvironmentFile=/etc/rover/agent.env
+Environment=ROVER_LIDAR_DEV=/dev/ttyS4
+Environment=ROVER_SCAN_FILE=/run/rover/scan2.json
+Environment=ROVER_LIDAR_STATS=/run/rover/lidar2_stats.json
+ExecStart=/opt/rover-agent/venv/bin/python /opt/rover-agent/lidar_delta.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

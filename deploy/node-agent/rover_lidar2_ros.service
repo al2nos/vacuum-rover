@@ -1,0 +1,18 @@
+[Unit]
+Description=Rover LiDAR #2 ROS2 node (scan2.json -> /scan2 LaserScan)
+After=network.target rover_lidar2.service
+ConditionPathExists=/dev/ttyS4
+
+[Service]
+EnvironmentFile=/etc/rover/agent.env
+Environment=ROVER_SCAN_FILE=/run/rover/scan2.json
+Environment=ROVER_SCAN_TOPIC=/scan2
+Environment=ROVER_SCAN_FRAME=lidar2
+Environment=ROVER_NODE_NAME=rover_lidar2_node
+ExecStart=/usr/bin/env bash -c "source /opt/ros/lyrical/setup.bash && exec python3 /opt/rover-agent/lidar_ros/lidar_node.py"
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

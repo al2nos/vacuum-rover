@@ -33,6 +33,7 @@ class RoverTf(Node):
         now = self.get_clock().now().to_msg()
         self.static.sendTransform([
             make("base_link", "lidar", now),
+            make("base_link", "lidar2", now),   # TODO: смещение/поворот после замера башни
             make("base_link", "base_footprint", now),
         ])
         self.timer = self.create_timer(0.05, self.tick)

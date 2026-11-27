@@ -11,6 +11,7 @@
 | `rover/<node>/telemetry/system` | узел → все | 0 | нет | `{"cpu": %, "mem": %, "temp": °C, "uptime": ч, "ts": epoch}` |
 | `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | статистика: `{"speed_hz": , "rpm": , "packets_ok": , "packets_bad": , "frames_meas": , "scan_age": }` |
 | `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | **скан:** `{"start": °, "step": °, "rpm": , "r": [мм,…]}` — см. ниже |
+| `rover/<node>/telemetry/lidar2` | узел → все | 0 | нет | второй лидар: тот же формат (статистика и скан), отдельный топик |
 | `rover/<node>/telemetry/map` | узел → все | 0 | нет | SLAM-карта: `{"occupied": [индексы], "info": {width, height, resolution, origin}}` — см. ниже |
 | `rover/<node>/telemetry/odom` | узел → все | 0 | нет | поза: `{"x": м, "y": м, "z": м, "yaw": рад}` |
 | `rover/<node>/telemetry/log` | узел → все | 0 | нет | строка ROS-журнала: `{"line": "…", "name": "узел"}` |
@@ -82,6 +83,15 @@
 `frames_meas`, `frames_speed`, `scan_age`) и публикуется раз в секунду.
 Телеметрия системы и телеуправление работают независимо от лидара.
 
+Второй лидар подключается тем же декодером с другим набором env: отдельный
+systemd-юнит `rover-lidar2.service` (`ROVER_LIDAR_DEV=/dev/ttyS4`,
+`ROVER_SCAN_FILE=/run/rover/scan2.json`,
+`ROVER_LIDAR_STATS=/run/rover/lidar2_stats.json`). Агент узнаёт о нём из
+`ROVER_LIDAR_EXTRA="lidar2:/run/rover/scan2.json:/run/rover/lidar2_stats.json"`
+и публикует в `telemetry/lidar2` (тот же формат). В ROS 2 работает
+`rover_lidar2_ros.service`: `/run/rover/scan2.json` → `/scan2`,
+`frame_id=lidar2`.
+
 ## Границы с ROS 2 / Nav2 (этап 3)
 
 Этот протокол — канал устройств и мониторинга, он не заменяется ROS 2.
@@ -124,7 +134,7 @@ Base controller на ровере слушает `/cmd_vel` (ROS) и `cmd/teleop
 подписка на все топики `rover/#`. API:
 
 - `GET /api/nodes` — узлы, живость, метрики, активность
-  (`sys_hz`, `lidar_hz`, `scan_points`, `scan_age`)
+  (`sys_hz`, `lidar_hz`, `scan_points`, `scan_age`, `lidars`)
 - `GET /api/history?node=&metric=&minutes=` — история из SQLite
 - `GET /api/logs?node=&limit=` — последние строки журнала узла (до 300)
 - `GET/POST /api/config/<node>` — чтение/запись конфигурации

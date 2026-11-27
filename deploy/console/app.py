@@ -63,13 +63,14 @@ def node_state(name):
     return nodes.setdefault(
         name, {"online": False, "last_seen": 0.0,
                "metrics": {}, "config": None,
-               "scan": None,            # последний скан лидара {r,start,step,...}
+               "scan": None,            # последний скан лидара №1 (совместимость)
+               "scans": {},             # лидар -> последний скан {r,start,step,...}
+               "scan_sent": {},         # лидар -> время последней отправки в WS
                "map": None,             # последняя SLAM-карта {data, info}
                "logs": deque(maxlen=300),   # журнал узла: {ts, line, count}
                "last_log": None,            # (line, ts) для дедупликации
                "pose": None,                # поза ровера {x, y, yaw} из /odom
                "msgs": {},              # source -> deque timestamps
-               "last_scan_sent": 0.0,
                "last_map_sent": 0.0,
                "last_pose_sent": 0.0})
 
@@ -106,19 +107,25 @@ def on_message(client, _u, msg):
         # учёт активности по источникам (system / lidar / ...)
         q = st["msgs"].setdefault(name, deque())
         q.append(now)
-        if name == "lidar" and isinstance(payload.get("r"), list):
-            # полный скан: храним последний, в SQLite не пишем (только счётчики)
-            st["scan"] = {"r": payload["r"],
-                          "start": float(payload.get("start", 0.0)),
-                          "step": float(payload.get("step", 1.0)),
-                          "rpm": payload.get("rpm"),
-                          "t": now}
+        if name.startswith("lidar") and isinstance(payload.get("r"), list):
+            # полный скан: храним последний по каждому лидару
+            # (lidar -> telemetry/lidar, lidar2 -> telemetry/lidar2),
+            # в SQLite не пишем — только счётчики.
+            scan = {"r": payload["r"],
+                    "start": float(payload.get("start", 0.0)),
+                    "step": float(payload.get("step", 1.0)),
+                    "rpm": payload.get("rpm"),
+                    "t": now}
+            st["scans"][name] = scan
+            if name == "lidar":
+                st["scan"] = scan
             st["last_seen"] = now
             st["online"] = True
-            if loop and now - st["last_scan_sent"] > 0.12:  # ~8 сканов/с макс
-                st["last_scan_sent"] = now
+            last = st["scan_sent"].get(name, 0.0)
+            if loop and now - last > 0.12:  # ~8 сканов/с макс на лидар
+                st["scan_sent"][name] = now
                 loop.call_soon_threadsafe(broadcast, {
-                    "type": "scan", "node": node, **st["scan"]})
+                    "type": "scan", "node": node, "source": name, **scan})
             # скаляры скана (rpm, rate_hz, потери) — как обычные метрики
             for metric, value in payload.items():
                 if metric in ("ts", "r", "start", "step") \
@@ -228,12 +235,18 @@ def api_nodes():
     for name, st in nodes.items():
         online = st["online"] and now - st["last_seen"] < ONLINE_TIMEOUT
         scan = st["scan"]
+        lidars = {}
+        for src, s in st["scans"].items():
+            lidars[src] = {"hz": msg_rate(st, src),
+                           "points": len(s["r"]),
+                           "age": round(now - s["t"], 1)}
         out.append({"name": name, "online": online,
                     "last_seen": st["last_seen"],
                     "sys_hz": msg_rate(st, "system"),
                     "lidar_hz": msg_rate(st, "lidar"),
                     "scan_points": len(scan["r"]) if scan else 0,
                     "scan_age": round(now - scan["t"], 1) if scan else None,
+                    "lidars": lidars,
                     **st["metrics"]})
     return JSONResponse(out)
 
