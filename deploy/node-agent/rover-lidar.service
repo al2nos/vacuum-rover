@@ -1,6 +1,9 @@
 [Unit]
 Description=Rover lidar decoder (Delta-2A/2C -> /run/rover/scan.json)
-After=multi-user.target
+# ВАЖНО: не ставить After=multi-user.target — вместе с WantedBy=multi-user
+# и rover-agent (After=rover-lidar) это даёт цикл, и systemd удаляет
+# запуск агента при загрузке.
+After=network.target
 
 [Service]
 EnvironmentFile=/etc/rover/agent.env

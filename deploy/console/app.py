@@ -65,8 +65,13 @@ def node_state(name):
                "metrics": {}, "config": None,
                "scan": None,            # последний скан лидара {r,start,step,...}
                "map": None,             # последняя SLAM-карта {data, info}
+               "logs": deque(maxlen=300),   # журнал узла: {ts, line, count}
+               "last_log": None,            # (line, ts) для дедупликации
+               "pose": None,                # поза ровера {x, y, yaw} из /odom
                "msgs": {},              # source -> deque timestamps
-               "last_scan_sent": 0.0})
+               "last_scan_sent": 0.0,
+               "last_map_sent": 0.0,
+               "last_pose_sent": 0.0})
 
 
 def msg_rate(st, source):
@@ -121,19 +126,44 @@ def on_message(client, _u, msg):
                     continue
                 st["metrics"][metric] = value
             return
-        if name == "map":
-            st["map"] = {"data": payload.get("data") or [], "info": payload.get("info") or {}}
+        if name == "odom":
+            x = float(payload.get("x") or 0.0)
+            y = float(payload.get("y") or 0.0)
+            yaw = float(payload.get("yaw") or 0.0)
+            st["pose"] = {"x": x, "y": y, "yaw": yaw, "t": now}
             st["online"] = True
-            if loop:
+            if loop and now - st["last_pose_sent"] > 0.2:
+                st["last_pose_sent"] = now
+                loop.call_soon_threadsafe(broadcast, {
+                    "type": "pose", "node": node, "x": x, "y": y, "yaw": yaw})
+            return
+        if name == "map":
+            st["map"] = {"occupied": payload.get("occupied") or [],
+                         "data": payload.get("data") or [],
+                         "info": payload.get("info") or {}}
+            st["online"] = True
+            # карта тяжёлая — не чаще ~1 Гц
+            if loop and now - st["last_map_sent"] > 1.0:
+                st["last_map_sent"] = now
                 loop.call_soon_threadsafe(broadcast, {
                     "type": "map", "node": node,
+                    "occupied": st["map"]["occupied"],
                     "data": st["map"]["data"], "info": st["map"]["info"]})
             return
         if name == "log":
             line = str(payload.get("line") or "")
+            prev = st["last_log"]
+            if prev and prev[0] == line and now - prev[1] < 5.0:
+                # повтор того же сообщения — только счётчик, без нового шума
+                prev[1] = now
+                st["logs"][-1]["count"] = st["logs"][-1].get("count", 1) + 1
+                return
+            st["last_log"] = [line, now]
+            entry = {"ts": now, "line": line, "count": 1}
+            st["logs"].append(entry)
             if loop:
                 loop.call_soon_threadsafe(broadcast, {
-                    "type": "log", "node": node, "line": line})
+                    "type": "log", "node": node, "line": line, "ts": now})
             return
         for metric, value in payload.items():
             if metric == "ts" or not isinstance(value, (int, float)):
@@ -218,6 +248,13 @@ def api_history(node: str, metric: str, minutes: int = 30):
     return JSONResponse({"node": node, "metric": metric,
                          "ts": [r[0] for r in rows],
                          "value": [r[1] for r in rows]})
+
+
+@app.get("/api/logs")
+def api_logs(node: str, limit: int = 200):
+    st = nodes.get(node)
+    rows = list(st["logs"])[-min(max(limit, 1), 300):] if st else []
+    return JSONResponse({"node": node, "lines": rows})
 
 
 @app.get("/api/config/{node}")

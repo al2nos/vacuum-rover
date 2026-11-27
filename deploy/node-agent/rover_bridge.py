@@ -11,6 +11,7 @@ MQTT -> ROS (управление):
 См. docs/protocol.md
 """
 import json
+import math
 import os
 
 import paho.mqtt.client as mqtt
@@ -63,8 +64,10 @@ class RoverBridge(Node):
 
     def map_cb(self, msg):
         try:
+            # передаём только занятые ячейки: полный grid (сотни КБ JSON) не нужен пульту
+            occupied = [i for i, v in enumerate(msg.data) if v >= 50]
             payload = {
-                "data": [float(v) for v in msg.data],
+                "occupied": occupied,
                 "info": {
                     "width": int(msg.info.width),
                     "height": int(msg.info.height),
@@ -82,13 +85,16 @@ class RoverBridge(Node):
 
     def odom_cb(self, msg):
         try:
+            q = msg.pose.pose.orientation
+            yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                             1.0 - 2.0 * (q.y * q.y + q.z * q.z))
             self.mqttc.publish(
                 f"rover/{NODE}/telemetry/odom",
                 json.dumps({
                     "x": float(msg.pose.pose.position.x),
                     "y": float(msg.pose.pose.position.y),
                     "z": float(msg.pose.pose.position.z),
-                    "w": float(msg.pose.pose.orientation.w),
+                    "yaw": float(yaw),
                 }),
             )
         except Exception as e:

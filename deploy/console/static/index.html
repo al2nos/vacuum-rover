@@ -86,6 +86,8 @@ table.act th{color:var(--dim);font-weight:500;font-size:12px}
         <th>Узел</th><th>system</th><th>лидар</th><th>точек</th><th>скан, с</th>
       </tr></thead><tbody id="actBody"><tr><td colspan="5" class="muted">нет данных</td></tr></tbody></table>
       <p class="muted" style="margin-top:10px">частота сообщений за 30 с · «скан» — возраст последнего скана</p>
+      <h4 style="margin:14px 0 8px">Состояние ровера</h4>
+      <div id="poseInfo" class="muted">поза: — (ждём /odom)</div>
     </div>
   </div>
 
@@ -117,11 +119,24 @@ const $ = s => document.querySelector(s);
 // базовый путь сервиса: /console/ (учитывает проксирование nginx)
 const BASE = location.pathname.endsWith('/') ? location.pathname
                                              : location.pathname + '/';
-let selected = null, ws = null, charts = {}, hist = {};
+let selected = null, ws = null, charts = {}, hist = {}, lastPose = null;
 
-function log(m){
-  const el = $('#log'); const t = new Date().toLocaleTimeString();
-  el.innerHTML += `<div>[${t}] ${m}</div>`; el.scrollTop = el.scrollHeight;
+function log(m, ts){
+  const el = $('#log');
+  const t = new Date(ts ? ts * 1000 : Date.now()).toLocaleTimeString();
+  const d = document.createElement('div');
+  d.textContent = `[${t}] ${m}`;          // textContent: строки ROS не должны исполняться как HTML
+  el.appendChild(d);
+  while(el.childElementCount > 300) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+async function loadLogs(name){
+  $('#log').innerHTML = '';
+  try{
+    const r = await (await fetch(`${BASE}api/logs?node=${encodeURIComponent(name)}&limit=200`)).json();
+    for(const l of (r.lines || []))
+      log(l.line + (l.count > 1 ? `  (×${l.count})` : ''), l.ts);
+  }catch(e){ /* журнал не критичен */ }
 }
 
 /* --- узлы --- */
@@ -171,6 +186,8 @@ async function selectNode(name){
   $('#teleNode').textContent = '(' + name + ')';
   $('#mapNode').textContent = '— ' + name;
   scans = [];
+  slamMap = null; mapStats = '';
+  $('#poseInfo').textContent = 'поза: — (ждём /odom)';
   $('#mapInfo').textContent = 'ожидание сканов от ' + name + ' …';
   drawMap();
   const box = $('#charts'); box.innerHTML = '';
@@ -195,6 +212,7 @@ async function selectNode(name){
     if(charts[m]) charts[m].setData([r.ts, r.value]);
   }));
   loadCfg();
+  loadLogs(name);
   refreshNodes();
 }
 
@@ -205,6 +223,14 @@ function connect(){
     const m = JSON.parse(e.data);
     if(m.type === 'scan'){
       if(m.node === selected) pushScan(m);
+      return;
+    }
+    if(m.type === 'pose'){
+      if(m.node === selected){
+        lastPose = m;
+        $('#poseInfo').textContent =
+          `x ${m.x.toFixed(2)} м · y ${m.y.toFixed(2)} м · θ ${(m.yaw * 180 / Math.PI).toFixed(0)}°`;
+      }
       return;
     }
     if(m.type === 'map'){
@@ -232,35 +258,43 @@ const map = $('#map'), mctx = map.getContext('2d');
 const MAP_R = 260; let RANGE_MM = 8000;   // видимое окно (мм): ±8 м
 let scans = [];                        // [{r,start,step,t}] — след, 8 сканов
 let slamMap = null;                    // последняя SLAM-карта {data, info}
+let mapStats = '';                     // сводка по SLAM-карте
 function pushScan(m){
   scans.push(m);
   if(scans.length > 8) scans.shift();
   drawMap();
   const pts = m.r.filter(v => v > 0).length;
-  $('#mapInfo').textContent = `${m.r.length} лучей · ${pts} отражений · rpm ${m.rpm ?? '—'}`;
+  $('#mapInfo').textContent = `${m.r.length} лучей · ${pts} отражений · rpm ${m.rpm ?? '—'}` + (mapStats ? ' · ' + mapStats : '');
 }
 function pushMap(m){
-  slamMap = {data: m.data || [], info: m.info || {}};
+  slamMap = {occupied: m.occupied || [], data: m.data || [], info: m.info || {}};
+  const i = slamMap.info || {};
+  if(i.width && i.height)
+    mapStats = `SLAM ${i.width}×${i.height} · ${(100*(i.resolution||0)).toFixed(0)} см/кл · ${slamMap.occupied.length} занятых`;
   drawMap();
 }
 function drawGrid(){
-  const data = slamMap.data || [], info = slamMap.info || {};
+  const info = slamMap.info || {};
   const w = info.width || 0, h = info.height || 0;
-  const res = info.resolution || 0.005;
+  const res = info.resolution || 0.05;          // м на ячейку
   const origin = info.origin || {x: 0, y: 0};
-  if(!w || !h || !data.length) return;
-  const k = MAP_R / (RANGE_MM / 2);   // px per meter
-  for(let i = 0; i < data.length; i++){
-    const v = Number(data[i]);
-    if(!(v > 50)) continue;          // occupied cells
+  const occupied = slamMap.occupied || [];
+  const data = slamMap.data || [];
+  if(!w || !h || (!occupied.length && !data.length)) return;
+  const ppm = MAP_R / (RANGE_MM / 1000);        // px на метр
+  const s = Math.max(res * ppm, 1);             // размер ячейки в px
+  mctx.fillStyle = '#f85149';
+  const drawCell = i => {
     const cx = i % w, cy = Math.floor(i / w);
-    const wx = (origin.x || 0) + (cx - w / 2) * res;
-    const wy = (origin.y || 0) + (cy - h / 2) * res;
-    const x = MAP_R + wx * k, y = MAP_R - wy * k;
-    if(x < -5 || x > MAP_R + RANGE_MM/2 + 5 || y < -5 || y > MAP_R + RANGE_MM/2 + 5) continue;
-    mctx.fillStyle = '#f85149';
-    mctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
-  }
+    const wx = (origin.x || 0) + (cx + 0.5) * res;   // центр ячейки, м
+    const wy = (origin.y || 0) + (cy + 0.5) * res;
+    const x = MAP_R + wx * ppm, y = MAP_R - wy * ppm;
+    if(x < -s || x > 520 + s || y < -s || y > 520 + s) return;
+    mctx.fillRect(x - s / 2, y - s / 2, s, s);
+  };
+  if(occupied.length){ occupied.forEach(drawCell); return; }
+  for(let i = 0; i < data.length; i++)
+    if(Number(data[i]) > 50) drawCell(i);
 }
 function drawMap(){
   mctx.clearRect(0,0,520,520);
