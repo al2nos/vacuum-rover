@@ -4,7 +4,7 @@ After=network.target rover_lidar2.service
 ConditionPathExists=/dev/ttyS4
 
 [Service]
-EnvironmentFile=/etc/rover/agent.env
+# Без EnvironmentFile: он перекрыл бы Environment= путями лидара №1.
 Environment=ROVER_SCAN_FILE=/run/rover/scan2.json
 Environment=ROVER_SCAN_TOPIC=/scan2
 Environment=ROVER_SCAN_FRAME=lidar2

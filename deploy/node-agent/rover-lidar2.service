@@ -7,7 +7,8 @@ After=network.target
 ConditionPathExists=/dev/ttyS4
 
 [Service]
-EnvironmentFile=/etc/rover/agent.env
+# ВАЖНО: без EnvironmentFile — он перекрывает Environment= (в agent.env
+# прописан лидар №1), и второй экземпляр писал бы в scan.json.
 Environment=ROVER_LIDAR_DEV=/dev/ttyS4
 Environment=ROVER_SCAN_FILE=/run/rover/scan2.json
 Environment=ROVER_LIDAR_STATS=/run/rover/lidar2_stats.json

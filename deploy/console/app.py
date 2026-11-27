@@ -175,16 +175,20 @@ def on_message(client, _u, msg):
         for metric, value in payload.items():
             if metric == "ts" or not isinstance(value, (int, float)):
                 continue
-            st["metrics"][metric] = value
+            # статистика доп. лидаров — со своим префиксом, чтобы не
+            # затирать метрики лидара №1 (packets_ok, rpm, ...)
+            key = (f"{name}_{metric}"
+                   if name.startswith("lidar") and name != "lidar" else metric)
+            st["metrics"][key] = value
             st["last_seen"] = now
             st["online"] = True
             with db_lock:
                 db.execute("INSERT INTO metrics VALUES(?,?,?,?)",
-                           (node, metric, now, float(value)))
+                           (node, key, now, float(value)))
             if loop:
                 loop.call_soon_threadsafe(broadcast, {
                     "type": "metric", "node": node,
-                    "metric": metric, "value": value, "ts": now})
+                    "metric": key, "value": value, "ts": now})
     elif kind == "config":
         try:
             st["config"] = json.loads(msg.payload or b"{}")
@@ -236,10 +240,12 @@ def api_nodes():
         online = st["online"] and now - st["last_seen"] < ONLINE_TIMEOUT
         scan = st["scan"]
         lidars = {}
-        for src, s in st["scans"].items():
+        for src in sorted((k for k in st["msgs"] if k.startswith("lidar")),
+                          key=lambda s: (s != "lidar", s)):
+            s = st["scans"].get(src)
             lidars[src] = {"hz": msg_rate(st, src),
-                           "points": len(s["r"]),
-                           "age": round(now - s["t"], 1)}
+                           "points": len(s["r"]) if s else 0,
+                           "age": round(now - s["t"], 1) if s else None}
         out.append({"name": name, "online": online,
                     "last_seen": st["last_seen"],
                     "sys_hz": msg_rate(st, "system"),

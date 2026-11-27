@@ -81,8 +81,8 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 
 `site-sync: done` (2026-11-27 — второй лидар: обновлены protocol/roadmap/
 STATE, пульт с двумя сканами; 13 файлов, все страницы и `/console/` —
-HTTP 200). Бортовая установка `rover-lidar2` ждёт включения Тинкера
-(на момент выкладки был офлайн).
+HTTP 200). Бортовые юниты `rover-lidar2`/`rover_lidar2_ros` установлены,
+`enabled`+`active`; ждём потока от подключённого лидара.
 
 Известное:
 
@@ -211,6 +211,7 @@ HTTP 200). Бортовая установка `rover-lidar2` ждёт вклю�
 | D23 | 2026-11-27 | У `rover-lidar` нет `After=multi-user.target`, только `network.target` | Иначе цикл `agent → lidar → multi-user → agent`: systemd удалял старт агента при включении |
 | D24 | 2026-11-27 | Второй лидар — UART4 на 40-pin (pin 19 TXD / pin 21 RXD), 3.3 В, `overlays=uart4` | Свободен, не требует USB-адаптера; пины делятся с SPI1, который не используется. TX замерен владельцем — 3.3 В |
 | D25 | 2026-11-27 | Второй скан идёт отдельным топиком `telemetry/lidar2`, в ROS — `/scan2` | Не ломает существующий `/scan`; пульт рисует оба скана. Слияние в costmap — только после замера TF `base_link→lidar2` |
+| D26 | 2026-11-27 | В юнитах второго лидара нет `EnvironmentFile` | `EnvironmentFile=` читается после `Environment=` и перекрывает его: второй декодер писал в `scan.json` лидара №1. Юнитам второго лидара креды не нужны |
 
 ## Этап 3 (2026-11-26): ROS 2 + SLAM + Nav2 + пульт
 
@@ -268,7 +269,7 @@ UART на 40-pin Tinker Board 2:
   `/dev/ttyS4` (`ff370000.serial`, 16550A). Остальные юниты после ребута
   остались `active`.
 
-Софт (в репозитории):
+Софт (в репозитории и установлен на борт):
 
 - `rover-lidar2.service` — второй экземпляр `lidar_delta.py`
   (`/dev/ttyS4` → `/run/rover/scan2.json`, `lidar2_stats.json`);
@@ -278,7 +279,14 @@ UART на 40-pin Tinker Board 2:
   `ROVER_SCAN_FRAME=lidar2`, `ROVER_NODE_NAME=rover_lidar2_node`) → `/scan2`;
 - `rover_tf.py` публикует статический `base_link→lidar2` (пока identity);
 - пульт: сканы обоих лидаров на карте (`lidar` — синий, `lidar2` — жёлтый),
-  частоты по каждому в `/api/nodes` (`lidars`).
+  частоты по каждому в `/api/nodes` (`lidars`), метрики второго лидара
+  с префиксом `lidar2_` (не затирают метрики первого).
+
+Состояние на 2026-11-27: оба юнита `enabled`+`active`, `/dev/ttyS4` открыт,
+`/run/rover/lidar2_stats.json` пишется, `telemetry/lidar2` идёт в MQTT
+(`lidar2.hz ≈ 1` — это статистика раз в секунду). Пакетов от железа пока
+нет (`lidar2_packets_ok = 0`) — второй лидар ещё не подключён/не запитан.
+Как только появится поток, `scan2.json` и `/scan2` начнут заполняться сами.
 
 Ограничение: физическое смещение/поворот второго лидара не замерено —
 TF `base_link→lidar2` остаётся identity, поэтому в costmap Nav2/SLAM
