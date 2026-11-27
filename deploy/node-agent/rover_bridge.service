@@ -1,0 +1,14 @@
+[Unit]
+Description=Rover ROS<->MQTT bridge (map, odom, logs, cmd_vel)
+After=network-online.target rover_lidar_ros.service nav2_bringup.service rosbridge.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/rover/agent.env
+ExecStart=/usr/bin/env bash -c "source /opt/ros/lyrical/setup.bash && exec python3 /opt/rover-agent/lidar_ros/rover_bridge.py"
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

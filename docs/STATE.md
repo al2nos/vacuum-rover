@@ -1,6 +1,6 @@
 # STATE.md — текущее состояние проекта
 
-Последнее обновление: 2026-11-25 (агент: deepseek-v4.1-flash)
+Последнее обновление: 2026-11-25, вечер (агент: deepseek-v4.1-flash)
 
 ## Модель работы
 
@@ -18,7 +18,81 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 затем второй. Шасси и замеры колёс — после этапа 0/1.
 Полный план этапа: `docs/roadmap.md` (Этап 0).
 
-## Сессия 2026-11-25 (итоги)
+**Этап 0 закрыт (2026-11-25, вечер):** первый лидар выдаёт живой скан,
+он виден на https://3dlb.ru/console/ (узел `tinker`, ~6 сообщ/с,
+360 точек, scan_age ≈ 0.1 с). Осталось: повторить после перезагрузки
+Тинкера, второй модуль — этап 1.
+
+## Сессия 2026-11-25 (вечер) — живой лидар на сайте
+
+Роль: Driver. Ветка: `task/tinker-lidar-mqtt`.
+
+Сделано:
+
+- **Распиновка (подтверждена по UM Tinker Board 2 и работе):** pin 8 =
+  UART0_TX (gpio81), pin 10 = UART0_RX (gpio80); лидар TX → pin 10,
+  GND → pin 6, +5 В (VCC) → pin 2.
+- **UART0 включён** пользовательским оверлеем `uart0-lidar`
+  (`/boot/overlay-user/uart0-lidar.dtbo`): `/dev/ttyS0`, 16550A,
+  `ff180000.serial`, irq 40.
+- **Найден и обойдён баг приёма:** после вмешательства в пины через
+  gpiolib (`gpiomon`/sysfs) UART0 остаётся в режиме GPIO — `rx` не растёт,
+  `LSR.DR` не поднимается. Лечение: `unbind`/`bind` драйвера
+  `dw-apb-uart` (зашито в `ExecStartPre` юнита `rover-lidar`).
+  Причина: подозрение на то, что debugfs `pinmux-pins` показывает
+  «желаемый», а не фактический мультиплексор.
+- **Второй корень проблемы — отсутствие общего GND** между БП лидара и
+  Тинкером (был подтверждён владельцем и устранён).
+- **Протокол:** наш модуль отдаёт `ver = 0x01` (семейство Delta-2A, не
+  0x13). При моторе 5 В — 8.05 Гц и только `0xAE` (скорость). При моторе
+  **3.3 В — 5.0 Гц и `0xAD` с точками**. Команды запуска по serial нет,
+  модуль автономный. Детали — `docs/lidars.md`.
+- **Написан декодер** `deploy/node-agent/lidar_delta.py` (0x01 и 0x11/0x13,
+  сборка оборота в 360 лучей, атомарная запись `/run/rover/scan.json`).
+  Проверен на живой записи: десятки тысяч кадров, 0 ошибок CRC.
+- **Агент** `deploy/node-agent/agent.py` доработан: сканы публикуются
+  потоком (опрос файла 20 Гц, публикация до ~8/с), скалярная статистика
+  лидара — 1 Гц. Добавлены юниты `rover-lidar.service`,
+  `rover-agent.service` (в репозитории, не только на железе).
+- **Развёрнуто на Тинкере:** `/opt/rover-agent` (+ venv: paho-mqtt,
+  psutil), `/etc/rover/agent.env` (600), оба юнита enabled+active.
+  MQTT-пользователь `tinker` заведён/ротирован на VDS.
+- **Проверка end-to-end:** `/api/nodes` на VDS: `tinker` online,
+  `lidar_hz` ≈ 6, `scan_points` 360, `scan_age` 0.1, `rpm` 300,
+  `packets_bad` 0.
+
+**`site-sync: done` (2026-11-25, вечер).**
+
+### Сессия 2026-11-25 (позднее) — фиксы пульт / консоль
+
+- Агент не поднимался корректно после ручного запуска (`nohup`): без env
+  из `/etc/rover/agent.env` MQTT-пароль пустой → отклонение
+  `disconnected, not authorised`. Лечение: `sudo systemctl start
+  rover-agent.service`.
+- После старта агента консоль показывает `tinker True 6.07 0.1 360`.
+- Масштаб карты лидара добавлен (`#mapRange`, 2–10 м → `RANGE_MM`).
+- Графики: исправлен overflow (`.chartbox { position: relative; overflow: hidden }`).
+- **Итог:** лидара живого скана на сайте **нет** — консоль отдаёт live.
+
+`site-sync: done` (2026-11-25, вечер, позднее).
+
+`site-sync: done` (2026-11-26 — этап 3: 13 файлов выложены в
+`/var/www/rover/`, все страницы и `/console/` — HTTP 200).
+
+`site-sync: done` (2026-11-27 — второй лидар: обновлены protocol/roadmap/
+STATE, пульт с двумя сканами; 13 файлов, все страницы и `/console/` —
+HTTP 200). Бортовые юниты `rover-lidar2`/`rover_lidar2_ros` установлены,
+`enabled`+`active`; ждём потока от подключённого лидара.
+
+Известное:
+
+- После перезагрузки Тинкера приём мог не подниматься сам — проверено,
+  что `ExecStartPre` с rebind лечит; **проверить полный reboot** ещё раз.
+- В консоли остаётся офлайн-узел `graphtest` (эмулятор) — чистится
+  перезапуском `rover-console` (не критично).
+
+## Сессия 2026-11-25 (день) — сайт-генератор
+
 
 Роль: Navigator. Issue: #1 (сайт-зеркало). Ветка: `task/site-generator`.
 
@@ -89,18 +163,17 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 
 ## Заблокировано (нужен человек)
 
-- [ ] Снять Delta-2C PRO с пылесоса C103 (башенка сверху, пара винтов)
-- [ ] Фото разъёма и платы модуля крупно — распиновка 5 пинов
-- [ ] Стенд: источник 5 В (зарядка/БП) + 2×AA для мотора 3.0 В
-- [ ] Замер уровня TX мультиметром (3.3 или 5 В)
-- [ ] Tinker Board 2: установка Ubuntu/Armbian, пользователь rover,
-      SSH-ключ агента, WireGuard по инструкции из чата (conf на VDS)
+- [ ] Замерить уровень TX второго лидара мультиметром (3.3 или 5 В) —
+      перед подключением кормового модуля; у Delta-2G TX = 5 В
+- [ ] Перезагрузить Тинкер и подтвердить, что лидар поднимается сам
+      (юнит `rover-lidar` с rebind в `ExecStartPre`)
+- [ ] Сменить пароль root VDS и пароль сайта (снова попадали в чат)
+- [ ] Завести SSH-ключ агента на VDS вместо разового пароля
 
 ## В работе
 
-- Свободно: порт декодера протокола Delta-2C PRO (0x11/0x13) на Python —
-  писать без железа, на эмуляторе пакетов. Писать сразу в форме
-  ROS-ноды (rclpy → LaserScan), MQTT-публикация тем же сканом.
+- Свободно: мост декодер → ROS 2 LaserScan (этап 0.5), затем этап 1 —
+  второй лидар (Delta-2A, ШИМ + PID мотора).
 
 ## Ближайшие задачи (по приоритету)
 
@@ -127,10 +200,158 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 | D12 | 2026-11-24 | Лёгкий стек мониторинга: mosquitto + FastAPI + SQLite, без Grafana | VDS имеет 380 МБ RAM / 1 CPU; проверено: весь контур ~180 МБ |
 | D13 | 2026-11-24 | Сканы лидара в MQTT как JSON {start,step,r:[мм]}, консоль без БД для сканов | Простое декодирование, 2 КБ/скан — легко для брокера; SQLite не раздувается |
 | D14 | 2026-11-24 | Nav2 — бортовой стек на Тинкере, сайт общается через rosbridge-прокси | VDS не тянет ROS 2; браузер не видит ровер за NAT; nginx-прокси почти бесплатен |
+| D15 | 2026-11-25 | Мотор первого лидара — 3.3 В постоянно (без ШИМ) | Даёт 5 Гц и стабильные `0xAD`; 5 В = 8 Гц, только `0xAE` |
+| D16 | 2026-11-25 | Декодер и агент — отдельные systemd-юниты на Тинкере | Лидар падает/перезапускается независимо от телеметрии; сканы идут потоком |
+| D17 | 2026-11-25 | `ExecStartPre` с unbind/bind `dw-apb-uart` в юните лидара | gpiolib-вмешательство оставляет UART0 в режиме GPIO; rebind возвращает приём |
+| D18 | 2026-11-26 | ROS 2 на Тинкере — Lyrical, не Jazzy | Образ Ubuntu 26.04/resolute: jazzy-пакетов нет; образ не меняли по просьбе владельца |
+| D19 | 2026-11-26 | Единый конвейер пульта — MQTT, rosbridge — дополнительно | Консоль уже на MQTT; мост ROS↔MQTT даёт карту/логи/команды без переделки фронтенда |
+| D20 | 2026-11-26 | nginx `/rosbridge/` → `10.77.0.11:9090`, не localhost | rosbridge живёт на Тинкере; `127.0.0.1:9090` на VDS давал 502 |
+| D21 | 2026-11-26 | `rover_tf`: `odom→base_link` identity 20 Гц до энкодеров | Без TF SLAM не мог обработать ни один скан; честная заглушка, заменить на одометрию колёс |
+| D22 | 2026-11-26 | Карта в MQTT — только занятые ячейки (`occupied`) | Полный OccupancyGrid — сотни КБ JSON; индексы — ~0.6 КБ, пульту хватает |
+| D23 | 2026-11-27 | У `rover-lidar` нет `After=multi-user.target`, только `network.target` | Иначе цикл `agent → lidar → multi-user → agent`: systemd удалял старт агента при включении |
+| D24 | 2026-11-27 | Второй лидар — UART4 на 40-pin (pin 19 TXD / pin 21 RXD), 3.3 В, `overlays=uart4` | Свободен, не требует USB-адаптера; пины делятся с SPI1, который не используется. TX замерен владельцем — 3.3 В |
+| D25 | 2026-11-27 | Второй скан идёт отдельным топиком `telemetry/lidar2`, в ROS — `/scan2` | Не ломает существующий `/scan`; пульт рисует оба скана. Слияние в costmap — только после замера TF `base_link→lidar2` |
+| D26 | 2026-11-27 | В юнитах второго лидара нет `EnvironmentFile` | `EnvironmentFile=` читается после `Environment=` и перекрывает его: второй декодер писал в `scan.json` лидара №1. Юнитам второго лидара креды не нужны |
+| D27 | 2026-11-27 | Обороты Delta-2C PRO регулируются только напряжением/ШИМ на моторе, внутренней стабилизации нет | В референсе kaiaai/LDS 2C крутится ШИМ + PID на ~7 Гц. 3.3 В DC дают 9.4 Гц → лидар шлёт `0xAE` без измерений. Нужен PWM/PID или подбор напряжения ~2.5 В |
+
+## Этап 3 (2026-11-26): ROS 2 + SLAM + Nav2 + пульт
+
+- ROS 2 **Lyrical** (не Jazzy — текущий образ Ubuntu 26.04 / resolute) установлен на
+  Тинкере: `ros-lyrical-ros-base`, `navigation2`, `slam-toolbox`, `rosbridge-suite`,
+  `nav2-bringup`.
+- systemd-юниты Тинкера: `rover_lidar_ros` (`/run/rover/scan.json` → `/scan`),
+  `slam_toolbox` (async → `/map`, `use_map_saver=True`, автосейв),
+  `nav2_bringup` (`slam:=True use_localization:=True use_sim_time:=False`),
+  `rosbridge` (`:9090`), `rover_bridge` (ROS↔MQTT).
+- VDS: nginx `/rosbridge/` → `ws://10.77.0.11:9090`, websocket Upgrade → **101**.
+- `rover_bridge`: `/map` → `telemetry/map`, `/odom` → `telemetry/odom`,
+  `/rosout` → `telemetry/log`; MQTT `rover/<node>/cmd/teleop` → ROS `/cmd_vel`.
+- Консоль: broadcast типов `map`/`log` по WebSocket; SLAM-карта рисуется на canvas
+  поверх сканов; журнал показывает ROS-логи. На сайте — `/console/`.
+- `/odom` — заглушка identity из `rover_tf` (20 Гц); реальной одометрии колёс
+  нет до base controller. Nav2/SLAM работают, TF-цепочка полная.
+- Путь управления: джойстик → `/console/ws` → `rover/<node>/cmd/teleop` →
+  `rover_bridge` → `/cmd_vel` (исполняющего моторного контроллера ещё нет).
+
+## Аудит 2026-11-26 (проверка соответствия пульта)
+
+Проверено на живой системе (MQTT, WebSocket, ROS). Найдены и исправлены
+дефекты, из-за которых «карта/логи» в пульте фактически не работали:
+
+| Что было | Причина | Исправление |
+|---|---|---|
+| `/scan` не публиковался вообще | `Header.stamp = …to_msg().stamp` — нет поля `stamp` | `stamp = …to_msg()` |
+| затем «no attribute intensity» | поле LaserScan — `intensities` (мн. ч.) | `msg.intensities` |
+| журнал забивался 20 ошибками/с | ошибка на каждом тике 20 Гц | публикация только нового скана (`ts`) + throttle ошибок 5 с |
+| карта не строилась | нет TF `odom→base_link`, SLAM искал `base_footprint` | новый `rover_tf`: `odom→base_link` 20 Гц, `base_link→{lidar, base_footprint}` static |
+| карта в пульте была точкой | `k = MAP_R/(RANGE_MM/2)` — px/м вместо px/мм | `ppm = MAP_R/(RANGE_MM/1000)`, координаты ячеек от `origin` |
+| журнал: XSS + рост DOM | `innerHTML` со строками ROS, без лимита | `textContent`, лимит 300 строк, история `/api/logs` |
+| дубли логов | одинаковые строки подряд | дедуп 5 с со счётчиком `×N` |
+| карта — сотни КБ JSON в MQTT | полный OccupancyGrid | только `occupied`-индексы (~0.6 КБ) |
+
+Проверка end-to-end после исправлений: `/scan` ~5.3 Гц; `/map` 52×54
+(93 занятых ячейки); MQTT `telemetry/{map,odom,log,lidar,system}` идут;
+WS-поток отдаёт `scan`, `map`, `pose`, `log`, `metric`; `/api/logs` — 200.
+
+Остаётся: `/odom` — identity (без энкодеров); в журнале Nav2 фоновые
+предупреждения `Keepout/SpeedFilter: Filter mask was not received`
+(фильтры Nav2 не настроены, на движение не влияют); нет панели
+lifecycle/целей Nav2 и клика по карте.
+
+## Второй лидар 2026-11-27
+
+Оборудование: второй Delta-2C PRO, тот же протокол. Подключение — свободный
+UART на 40-pin Tinker Board 2:
+
+- **pin 19 — UART4_TXD**, **pin 21 — UART4_RXD** (GPIO1_B0 / GPIO1_A7);
+  уровень TX замерен владельцем — **3.3 В**, делитель не нужен;
+- UART4 делит пины с SPI1 (не используется). Включён через
+  `overlays=uart4` в `/boot/armbianEnv.txt`; после ребута появился
+  `/dev/ttyS4` (`ff370000.serial`, 16550A). Остальные юниты после ребута
+  остались `active`.
+
+Софт (в репозитории и установлен на борт):
+
+- `rover-lidar2.service` — второй экземпляр `lidar_delta.py`
+  (`/dev/ttyS4` → `/run/rover/scan2.json`, `lidar2_stats.json`);
+- `agent.py` — `ROVER_LIDAR_EXTRA="lidar2:<scan>:<stats>"` →
+  `rover/<node>/telemetry/lidar2`;
+- `rover_lidar2_ros.service` + `lidar_node.py` (`ROVER_SCAN_TOPIC=/scan2`,
+  `ROVER_SCAN_FRAME=lidar2`, `ROVER_NODE_NAME=rover_lidar2_node`) → `/scan2`;
+- `rover_tf.py` публикует статический `base_link→lidar2` (пока identity);
+- пульт: сканы обоих лидаров на карте (`lidar` — синий, `lidar2` — жёлтый),
+  частоты по каждому в `/api/nodes` (`lidars`), метрики второго лидара
+  с префиксом `lidar2_` (не затирают метрики первого).
+
+Состояние на 2026-11-27: оба юнита `enabled`+`active`, `/dev/ttyS4` открыт,
+`/run/rover/lidar2_stats.json` пишется, `telemetry/lidar2` идёт в MQTT.
+Пакеты от второго лидара приходят без ошибок (`packets_bad = 0`), но все
+кадры — `0xAE` (`dlen=1`, только скорость) при **9.4 Гц / 564 об/мин**:
+лидар вне окна измерений. Причина — у 2C PRO нет внутренней стабилизации
+оборотов, нужен ШИМ с PID на ~7 Гц (D27); постоянные 3.3 В дают 9.4 Гц.
+Первый скан (`scan2.json`, rpm 426) собрался только на старте, пока мотор
+не раскрутился. Как только обороты войдут в окно, `0xAD` и сканы пойдут
+сами, перезапуск не нужен.
+
+Заодно исправлен лимит кадра декодера под 2C (`MAX_FRAME` 95 → 137 байт):
+у 2C бывает до 29+ отсчётов, старый лимит отбрасывал бы валидные кадры.
+
+Ограничение: физическое смещение/поворот второго лидара не замерено —
+TF `base_link→lidar2` остаётся identity, поэтому в costmap Nav2/SLAM
+`/scan2` пока не подмешивается. Пульт показывает его как отдельный слой.
+
+## Этап: второй модуль — Orange Pi 3 LTS (2026-11-27, подготовка)
+
+Цель этапа: вынести второй лидар (Delta-2C PRO) и/или шлюз телеметрии с
+Tinker Board 2 на отдельный модуль **Orange Pi 3 LTS** (RK3399, как и Тинкер,
+A72+A53), чтобы распределить нагрузку и получить второй вычислитель в флоте.
+
+Планы (см. `deploy/site.json` + `docs/architecture.md`):
+
+1. **OP3 — второй лидар:** lidar_delta + rover-agent на OP3, второй лидар
+   подключается к UART OP3; агент публикует в MQTT как новый узел
+   (`rover/<node>/telemetry/lidar2`). Декодер — `deploy/node-agent/lidar_delta.py`.
+2. **OP3 — шлюз:** телеуправление, видеострим, дашборд (см. site.json,
+   `10.77.0.12`, state `waiting` — «ожидает подключение к проекту»).
+3. **WireGuard:** peer `orangepil3 → 10.77.0.12` уже описан
+   (`deploy/site.json`, `/usr/local/bin/make-peer.sh` на VDS).
+
+Deployment-артефакты для модуля:
+
+- `deploy/node-agent/rover-lidar-opos3.service` — юнит декодера на OP3
+  (аналог `rover-lidar2.service`: UART → `/run/rover/scan2.json` → agent).
+
+Ограничения/отложения:
+
+- Мотор 2C (PWM+PID ~7 Гц) — пока не решён (Tinker: busy/exc, без диода).
+  Если лидар переедет на OP3 — там тот же RK3399, решение переносится.
+- Слияние `/scan` + `/scan2` в costmap Nav2 — после замера TF.
+
+## Холодная загрузка 2026-11-27 (агент не стартовал)
+
+Симптом: после включения Тинкера узел в пульте не появлялся.
+
+Причина: в `rover-lidar.service` стояло `After=multi-user.target`.
+Оба юнита (`rover-lidar`, `rover-agent`) — `WantedBy=multi-user.target`,
+а агент — `After=rover-lidar.service`; получался цикл
+`agent → lidar → multi-user → agent`. systemd писал
+`Found ordering cycle` и **удалял job `rover-agent.service/start`** —
+декодер работал, а телеметрия/сканы в MQTT не уходили.
+
+Исправление: `After=network.target` в `rover-lidar.service`
+(`deploy/node-agent/rover-lidar.service`), `daemon-reload`, перезагрузка.
+
+Проверка после реального `systemctl reboot`: `rover-lidar`, `rover-agent`,
+`rover_lidar_ros`, `rover_tf`, `nav2_bringup`, `rosbridge`, `rover_bridge` —
+все `active`; `systemctl --failed` — пусто; `scan.json` свежий;
+`/api/nodes`: `tinker online, lidar_hz 5.87, scan_age 0.0`;
+MQTT идут `lidar`, `map`, `odom`, `log`, `system`; в журнале загрузки
+цикла нет.
 
 ## Открытые вопросы
 
-- Распиновка разъёма Delta-2C PRO — по фото от владельца
-- Уровень TX лидара: 3.3 или 5 В
-- Образ Тинкера: Ubuntu/Armbian — что установлено
-- Сменить пароль root VDS (он был в чате) — напомнить владельцу
+- ~~Распиновка~~ — подтверждена: pin 8 TX, pin 10 RX, pin 6 GND, pin 2 +5 В
+- ~~Образ Тинкера~~ — Armbian Ubuntu 26.04, ядро 6.18.64
+- Уровень TX второго лидара: 3.3 или 5 В (первый подключён напрямую и работает)
+- Как поведёт себя приём UART0 после холодной перезагрузки (проверить)
+- Сменить пароль root VDS и сайта (были в чате) — напомнить владельцу

@@ -1,0 +1,11 @@
+[Unit]
+Description=Nav2 bringup with SLAM (Delta lidar)
+After=network.target rover_lidar_ros.service
+
+[Service]
+ExecStart=/usr/bin/env bash -c "source /opt/ros/lyrical/setup.bash && exec ros2 launch nav2_bringup bringup_launch.py slam:=True use_localization:=True use_sim_time:=False"
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target

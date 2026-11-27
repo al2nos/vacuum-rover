@@ -1,0 +1,15 @@
+[Unit]
+Description=Rover lidar #2 (Orange Pi 3 LTS) decoder (UART -> scan2)
+# Второй модуль: Orange Pi 3 LTS. Сюда будет подключён второй лидар
+# (Delta-2C PRO) и запущен лёгкий стек: lidar_delta -> /run/rover/scan2.json
+# -> rover-agent -> telemetry/lidar2 -> пульт/VDS.
+After=network.target
+Environment=ROVER_LIDAR_DEV=/dev/ttyS0
+Environment=ROVER_SCAN_FILE=/run/rover/scan2.json
+Environment=ROVER_LIDAR_STATS=/run/rover/lidar2_stats.json
+ExecStart=/opt/rover-agent/venv/bin/python /opt/rover-agent/lidar_delta.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

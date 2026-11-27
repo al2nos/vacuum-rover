@@ -52,6 +52,55 @@ rsync -a dist/ root@3dlb.ru:/var/www/rover/
 Агент без доступа к VDS после правки `docs/` ставит в `STATE.md`
 пометку `site-sync: pending`.
 
+## Узел ровера (Тинкер): лидар + агент
+
+`deploy/node-agent/` — то, что ставится на борт:
+
+| Файл | Назначение |
+|---|---|
+| `lidar_delta.py` | декодер Delta-2A/2C: `/dev/ttyS0` → `/run/rover/scan.json` |
+| `agent.py` | MQTT: телеметрия системы + поток сканов + статистика лидара(ов) |
+| `rover-lidar.service`, `rover-agent.service` | systemd-юниты лидара №1 |
+| `rover-lidar2.service`, `rover_lidar2_ros.service` | второй лидар: UART4 → `scan2.json` → `/scan2` |
+
+Установка (root на узле):
+
+```sh
+mkdir -p /opt/rover-agent /etc/rover /run/rover
+install -m644 lidar_delta.py agent.py /opt/rover-agent/
+install -m600 agent.env /etc/rover/agent.env   # ROVER_NODE/BROKER/USER/PASS
+apt install -y python3.14-venv                 # ensurepip в Armbian отсутствует
+python3 -m venv /opt/rover-agent/venv
+/opt/rover-agent/venv/bin/pip install 'paho-mqtt>=1.6' psutil
+install -m644 rover-lidar.service rover-agent.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now rover-lidar rover-agent
+```
+
+`agent.env` (не в репозитории):
+
+```
+ROVER_NODE=tinker
+ROVER_BROKER=10.77.0.1
+ROVER_MQTT_USER=tinker
+ROVER_MQTT_PASS=<из mosquitto_passwd на VDS>
+ROVER_SCAN_FILE=/run/rover/scan.json
+ROVER_LIDAR_STATS=/run/rover/lidar_stats.json
+# второй лидар (UART4); формат: имя:путь_скана:путь_статистики
+ROVER_LIDAR_EXTRA=lidar2:/run/rover/scan2.json:/run/rover/lidar2_stats.json
+```
+
+Второй лидар: UART4 на 40-pin (pin 19 = TXD, pin 21 = RXD, 3.3 В),
+`overlays=uart4` в `/boot/armbianEnv.txt` → `/dev/ttyS4`.
+`systemctl enable --now rover-lidar2 rover_lidar2_ros`.
+
+Проверка: `cat /run/rover/lidar_stats.json` (растёт `frames_meas`),
+`journalctl -u rover-lidar -f`, затем `/api/nodes` консоли.
+
+`ExecStartPre` в `rover-lidar.service` переинициализирует UART0: если пины
+трогали через gpiolib, драйвер остаётся в режиме GPIO и байты не приходят.
+
+
 ## Требования к nginx (сниппет)
 
 Применяется владельцем или агентом с доступом к VDS. Точные пути к

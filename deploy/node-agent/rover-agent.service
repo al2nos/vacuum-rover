@@ -1,0 +1,13 @@
+[Unit]
+Description=Rover node agent (MQTT telemetry + lidar scan bridge)
+After=network-online.target rover-lidar.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/rover/agent.env
+ExecStart=/opt/rover-agent/venv/bin/python /opt/rover-agent/agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

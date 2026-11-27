@@ -26,7 +26,7 @@ h2{font-size:16px;margin:24px 0 12px;color:var(--dim);text-transform:uppercase;l
 .mrow b{font-weight:600;color:var(--text)}
 .muted{color:var(--dim)}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px}
-.chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.chartbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;position:relative;overflow:hidden}
 .chartbox h4{font-size:12px;color:var(--dim);margin-bottom:6px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
 .row{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
@@ -68,7 +68,17 @@ table.act th{color:var(--dim);font-weight:500;font-size:12px}
   <div class="row">
     <div class="panel">
       <canvas id="map" width="520" height="520"></canvas>
-      <p class="muted" style="text-align:center;margin-top:8px" id="mapInfo">сканов нет — запустите лидар узла (telemetry/lidar, поле r)</p>
+      <p class="muted" style="text-align:center;margin-top:8px" id="mapInfo">сканов нет — запустите лидар(ы) узла (telemetry/lidar, telemetry/lidar2)</p>
+      <div style="margin-top:10px;text-align:center">
+        <label class="muted" for="mapRange">Масштаб карты (видимое расстояние):</label>
+        <select id="mapRange" style="margin-left:6px">
+          <option value="2000">2 м</option>
+          <option value="4000">4 м</option>
+          <option value="6000">6 м</option>
+          <option value="8000" selected>8 м</option>
+          <option value="10000">10 м</option>
+        </select>
+      </div>
     </div>
     <div class="panel" style="flex:0 0 300px">
       <h4 style="margin-bottom:10px">Активность датчиков</h4>
@@ -76,6 +86,8 @@ table.act th{color:var(--dim);font-weight:500;font-size:12px}
         <th>Узел</th><th>system</th><th>лидар</th><th>точек</th><th>скан, с</th>
       </tr></thead><tbody id="actBody"><tr><td colspan="5" class="muted">нет данных</td></tr></tbody></table>
       <p class="muted" style="margin-top:10px">частота сообщений за 30 с · «скан» — возраст последнего скана</p>
+      <h4 style="margin:14px 0 8px">Состояние ровера</h4>
+      <div id="poseInfo" class="muted">поза: — (ждём /odom)</div>
     </div>
   </div>
 
@@ -107,11 +119,24 @@ const $ = s => document.querySelector(s);
 // базовый путь сервиса: /console/ (учитывает проксирование nginx)
 const BASE = location.pathname.endsWith('/') ? location.pathname
                                              : location.pathname + '/';
-let selected = null, ws = null, charts = {}, hist = {};
+let selected = null, ws = null, charts = {}, hist = {}, lastPose = null;
 
-function log(m){
-  const el = $('#log'); const t = new Date().toLocaleTimeString();
-  el.innerHTML += `<div>[${t}] ${m}</div>`; el.scrollTop = el.scrollHeight;
+function log(m, ts){
+  const el = $('#log');
+  const t = new Date(ts ? ts * 1000 : Date.now()).toLocaleTimeString();
+  const d = document.createElement('div');
+  d.textContent = `[${t}] ${m}`;          // textContent: строки ROS не должны исполняться как HTML
+  el.appendChild(d);
+  while(el.childElementCount > 300) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+async function loadLogs(name){
+  $('#log').innerHTML = '';
+  try{
+    const r = await (await fetch(`${BASE}api/logs?node=${encodeURIComponent(name)}&limit=200`)).json();
+    for(const l of (r.lines || []))
+      log(l.line + (l.count > 1 ? `  (×${l.count})` : ''), l.ts);
+  }catch(e){ /* журнал не критичен */ }
 }
 
 /* --- узлы --- */
@@ -153,14 +178,16 @@ const PALETTE = ['#58a6ff','#3fb950','#d29922','#f778ba','#a371f7',
                  '#76e3ea','#ffa657','#e6edf3'];
 /* служебные поля /api/nodes — не датчики */
 const NOT_METRIC = new Set(['name','online','last_seen','sys_hz','lidar_hz',
-                            'scan_points','scan_age']);
+                            'scan_points','scan_age','lidars']);
 
 async function selectNode(name){
   selected = name;
   $('#chartNode').textContent = '— ' + name;
   $('#teleNode').textContent = '(' + name + ')';
   $('#mapNode').textContent = '— ' + name;
-  scans = [];
+  scansBySrc = {};
+  slamMap = null; mapStats = '';
+  $('#poseInfo').textContent = 'поза: — (ждём /odom)';
   $('#mapInfo').textContent = 'ожидание сканов от ' + name + ' …';
   drawMap();
   const box = $('#charts'); box.innerHTML = '';
@@ -185,6 +212,7 @@ async function selectNode(name){
     if(charts[m]) charts[m].setData([r.ts, r.value]);
   }));
   loadCfg();
+  loadLogs(name);
   refreshNodes();
 }
 
@@ -195,6 +223,22 @@ function connect(){
     const m = JSON.parse(e.data);
     if(m.type === 'scan'){
       if(m.node === selected) pushScan(m);
+      return;
+    }
+    if(m.type === 'pose'){
+      if(m.node === selected){
+        lastPose = m;
+        $('#poseInfo').textContent =
+          `x ${m.x.toFixed(2)} м · y ${m.y.toFixed(2)} м · θ ${(m.yaw * 180 / Math.PI).toFixed(0)}°`;
+      }
+      return;
+    }
+    if(m.type === 'map'){
+      if(m.node === selected) pushMap(m);
+      return;
+    }
+    if(m.type === 'log'){
+      if(m.node === selected) log('[ROS] ' + (m.line || ''));
       return;
     }
     if(m.type !== 'metric') return;
@@ -211,17 +255,63 @@ connect();
 
 /* --- карта лидара --- */
 const map = $('#map'), mctx = map.getContext('2d');
-const MAP_R = 260, RANGE_MM = 8000;   // видимое окно: ±8 м
-let scans = [];                        // [{r,start,step,t}] — след, 8 сканов
+const MAP_R = 260; let RANGE_MM = 8000;   // видимое окно (мм): ±8 м
+let scansBySrc = {};                   // лидар -> [{r,start,step,t}] след, 8 сканов
+const LIDAR_COLORS = {lidar: '#58a6ff', lidar2: '#d29922'};
+function hexA(hex, a){
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a.toFixed(2)})`;
+}
+let slamMap = null;                    // последняя SLAM-карта {data, info}
+let mapStats = '';                     // сводка по SLAM-карте
 function pushScan(m){
-  scans.push(m);
-  if(scans.length > 8) scans.shift();
+  const src = m.source || 'lidar';
+  const arr = scansBySrc[src] || (scansBySrc[src] = []);
+  arr.push(m);
+  if(arr.length > 8) arr.shift();
   drawMap();
-  const pts = m.r.filter(v => v > 0).length;
-  $('#mapInfo').textContent = `${m.r.length} лучей · ${pts} отражений · rpm ${m.rpm ?? '—'}`;
+  const parts = [];
+  for(const [name, list] of Object.entries(scansBySrc)){
+    const s = list[list.length - 1];
+    if(!s) continue;
+    const pts = s.r.filter(v => v > 0).length;
+    parts.push(`${name}: ${s.r.length} лучей · ${pts} отр. · ${(s.rpm ?? '—')} rpm`);
+  }
+  $('#mapInfo').textContent = parts.join('  |  ') + (mapStats ? '  |  ' + mapStats : '');
+}
+function pushMap(m){
+  slamMap = {occupied: m.occupied || [], data: m.data || [], info: m.info || {}};
+  const i = slamMap.info || {};
+  if(i.width && i.height)
+    mapStats = `SLAM ${i.width}×${i.height} · ${(100*(i.resolution||0)).toFixed(0)} см/кл · ${slamMap.occupied.length} занятых`;
+  drawMap();
+}
+function drawGrid(){
+  const info = slamMap.info || {};
+  const w = info.width || 0, h = info.height || 0;
+  const res = info.resolution || 0.05;          // м на ячейку
+  const origin = info.origin || {x: 0, y: 0};
+  const occupied = slamMap.occupied || [];
+  const data = slamMap.data || [];
+  if(!w || !h || (!occupied.length && !data.length)) return;
+  const ppm = MAP_R / (RANGE_MM / 1000);        // px на метр
+  const s = Math.max(res * ppm, 1);             // размер ячейки в px
+  mctx.fillStyle = '#f85149';
+  const drawCell = i => {
+    const cx = i % w, cy = Math.floor(i / w);
+    const wx = (origin.x || 0) + (cx + 0.5) * res;   // центр ячейки, м
+    const wy = (origin.y || 0) + (cy + 0.5) * res;
+    const x = MAP_R + wx * ppm, y = MAP_R - wy * ppm;
+    if(x < -s || x > 520 + s || y < -s || y > 520 + s) return;
+    mctx.fillRect(x - s / 2, y - s / 2, s, s);
+  };
+  if(occupied.length){ occupied.forEach(drawCell); return; }
+  for(let i = 0; i < data.length; i++)
+    if(Number(data[i]) > 50) drawCell(i);
 }
 function drawMap(){
   mctx.clearRect(0,0,520,520);
+  if(slamMap && slamMap.data && slamMap.data.length) drawGrid();
   const k = MAP_R / RANGE_MM;         // мм -> px
   // сетка: кольца каждый метр + оси
   mctx.strokeStyle = '#21262d'; mctx.lineWidth = 1;
@@ -234,19 +324,22 @@ function drawMap(){
   mctx.moveTo(MAP_R,10); mctx.lineTo(MAP_R,510);
   mctx.moveTo(10,MAP_R); mctx.lineTo(510,MAP_R);
   mctx.stroke();
-  // след старых сканов
-  scans.forEach((s, i) => {
-    const a = (i + 1) / scans.length;
-    mctx.fillStyle = i === scans.length - 1 ? '#58a6ff' : `rgba(88,166,255,${(a*0.25).toFixed(2)})`;
-    for(let j = 0; j < s.r.length; j++){
-      const d = s.r[j];
-      if(!d || d > RANGE_MM) continue;
-      const ang = (s.start + j * s.step) * Math.PI / 180;
-      const x = MAP_R + d * k * Math.sin(ang);
-      const y = MAP_R - d * k * Math.cos(ang);
-      mctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
-    }
-  });
+  // след старых сканов — по каждому лидару своим цветом
+  for(const [src, arr] of Object.entries(scansBySrc)){
+    const color = LIDAR_COLORS[src] || '#a371f7';
+    arr.forEach((s, i) => {
+      const a = (i + 1) / arr.length;
+      mctx.fillStyle = i === arr.length - 1 ? color : hexA(color, a * 0.25);
+      for(let j = 0; j < s.r.length; j++){
+        const d = s.r[j];
+        if(!d || d > RANGE_MM) continue;
+        const ang = (s.start + j * s.step) * Math.PI / 180;
+        const x = MAP_R + d * k * Math.sin(ang);
+        const y = MAP_R - d * k * Math.cos(ang);
+        mctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
+      }
+    });
+  }
   // ровер — треугольник, нос вверх
   mctx.fillStyle = '#3fb950';
   mctx.beginPath();
@@ -254,6 +347,10 @@ function drawMap(){
   mctx.closePath(); mctx.fill();
 }
 drawMap();
+$('#mapRange').addEventListener('change', function(){
+  RANGE_MM = parseInt(this.value, 10);
+  drawMap();
+});
 
 /* --- активность датчиков --- */
 async function refreshActivity(){
@@ -264,9 +361,10 @@ async function refreshActivity(){
   for(const n of ns){
     const tr = document.createElement('tr');
     const age = n.scan_age === null ? '—' : n.scan_age;
+    const l2 = n.lidars && n.lidars.lidar2 ? ` / ${n.lidars.lidar2.hz}` : '';
     tr.innerHTML = `<td><span class="pulse ${n.online?'on':'off'}"></span>${n.name}</td>
       <td>${n.sys_hz ?? 0} msg/s</td>
-      <td>${n.lidar_hz ?? 0} scan/s</td>
+      <td>${n.lidar_hz ?? 0}${l2} scan/s</td>
       <td>${n.scan_points || '—'}</td>
       <td>${age}</td>`;
     tb.appendChild(tr);
