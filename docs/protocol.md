@@ -11,6 +11,9 @@
 | `rover/<node>/telemetry/system` | узел → все | 0 | нет | `{"cpu": %, "mem": %, "temp": °C, "uptime": ч, "ts": epoch}` |
 | `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | статистика: `{"speed_hz": , "rpm": , "packets_ok": , "packets_bad": , "frames_meas": , "scan_age": }` |
 | `rover/<node>/telemetry/lidar` | узел → все | 0 | нет | **скан:** `{"start": °, "step": °, "rpm": , "r": [мм,…]}` — см. ниже |
+| `rover/<node>/telemetry/map` | узел → все | 0 | нет | SLAM-карта: `{"occupied": [индексы], "info": {width, height, resolution, origin}}` — см. ниже |
+| `rover/<node>/telemetry/odom` | узел → все | 0 | нет | поза: `{"x": м, "y": м, "z": м, "yaw": рад}` |
+| `rover/<node>/telemetry/log` | узел → все | 0 | нет | строка ROS-журнала: `{"line": "…", "name": "узел"}` |
 | `rover/<node>/status` | узел (LWT) | 0 | **да** | `online` / `offline` (last will) |
 | `rover/<node>/cmd/teleop` | пульт → узел | 0 | нет | `{"vx": м/с, "wz": рад/с, "ts": epoch}` |
 | `rover/<node>/config` | узел → все | 0 | **да** | текущий конфиг узла (любой JSON) |
@@ -43,6 +46,31 @@
   частоту (scans/s) и шлёт в браузер по WebSocket (`{"type":"scan",…}`,
   троттлинг ~8/с). В SQLite остаются только скалярные метрики.
 
+## SLAM-карта, поза и журнал (мост ROS ↔ MQTT)
+
+Мост `rover_bridge` на Тинкере публикует:
+
+- `/map` (nav_msgs/OccupancyGrid) → `telemetry/map`. Передаются **только
+  занятые ячейки** (`occupied` — индексы `row*width+col`), чтобы не гнать
+  в MQTT полный массив (сотни КБ). Формат:
+
+  ```json
+  {
+    "occupied": [111, 112, 113, …],
+    "info": {"width": 52, "height": 54, "resolution": 0.05,
+             "origin": {"x": -0.61, "y": -0.77, "z": 0.0}}
+  }
+  ```
+
+  Мир: `x = origin.x + (col + 0.5)*resolution`, `y = origin.y + (row + 0.5)*resolution`.
+- `/odom` (nav_msgs/Odometry) → `telemetry/odom` (10–20 Гц; консоль
+  троттлит до 5 Гц). Сейчас поза — identity: энкодеров колёс ещё нет,
+  TF `odom → base_link` публикует `rover_tf` (заглушка до base controller).
+- `/rosout` (rcl_interfaces/Log) → `telemetry/log`.
+
+Консоль дедуплицирует одинаковые строки журнала (5 с) и хранит последние
+300 строк на узел с историей (`GET /api/logs`).
+
 ## Мост «декодер → консоль» на узле
 
 Агент узла (`deploy/node-agent/agent.py`) пробрасывает сканы от
@@ -61,18 +89,19 @@
 
 - **MQTT (этот документ)** — телеметрия, сканы, статус, телеоп-резерв,
   конфиги. Всё, что должно работать на любом железе и за NAT.
-- **ROS 2 Jazzy** — бортовой автономный стек на Tinker Board 2:
+- **ROS 2 Lyrical** — бортовой автономный стек на Tinker Board 2:
   LaserScan, tf, slam_toolbox, Nav2, `/cmd_vel`. Внешнего доступа
   не имеет, кроме rosbridge.
 - **rosbridge** — WebSocket-JSON поверх ROS 2 на Тинкере (порт 9090);
   nginx на VDS проксирует `/rosbridge/` → `ws://10.77.0.11:9090`.
-  Через него пульт получает `/map`, `/amcl_pose`, `/plan` и шлёт
-  цели (`/navigate_to_pose`), рендер — roslibjs в браузере.
+  Через него браузер может получать полные ROS-топики (`/map`, `/plan`)
+  и отправлять цели Nav2 (`/navigate_to_pose`).
+- **Мост `rover_bridge`** — компактный срез ROS для пульта по MQTT:
+  только занятые ячейки карты, поза, строки журнала. Полные карты/пути/
+  costmap через MQTT по-прежнему не гоняются.
 
-Правило: карты/пути/costmap через MQTT не гонять (объём, частота),
-мониторинг через rosbridge не дублировать. Base controller на ровере
-слушает `/cmd_vel` (Nav2) и `cmd/teleop` (MQTT) с приоритетом
-автономки и общим watchdog 0.5 с.
+Base controller на ровере слушает `/cmd_vel` (ROS) и `cmd/teleop` (MQTT,
+через мост) с приоритетом автономки и общим watchdog 0.5 с.
 
 ## Соглашения
 
@@ -97,13 +126,17 @@
 - `GET /api/nodes` — узлы, живость, метрики, активность
   (`sys_hz`, `lidar_hz`, `scan_points`, `scan_age`)
 - `GET /api/history?node=&metric=&minutes=` — история из SQLite
+- `GET /api/logs?node=&limit=` — последние строки журнала узла (до 300)
 - `GET/POST /api/config/<node>` — чтение/запись конфигурации
-- `WS /ws` — live-поток метрик и сканов + приём команд телеуправления
+- `WS /ws` — live-поток: `metric`, `scan`, `map` (occupied-ячейки),
+  `pose` (x, y, yaw), `log`; приём команд телеуправления
 
 Экран пульта: карточки узлов · графики по каждому датчику (30 мин +
-live) · **карта лидара** (последние сканы, вид сверху, след затухает) ·
+live) · **карта** (live-сканы лидара + SLAM-занятые ячейки, вид сверху) ·
 **активность датчиков** (msg/s по источникам, возраст скана) ·
-джойстик телеуправления · редактор конфигурации · журнал.
+**состояние ровера** (поза из `/odom`) · джойстик телеуправления ·
+редактор конфигурации · **журнал** (ROS-логи с историей и счётчиком
+повторов).
 
 ## Доступы (хранятся на VDS, НЕ в репозитории)
 

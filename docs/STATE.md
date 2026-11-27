@@ -201,6 +201,9 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
 | D18 | 2026-11-26 | ROS 2 на Тинкере — Lyrical, не Jazzy | Образ Ubuntu 26.04/resolute: jazzy-пакетов нет; образ не меняли по просьбе владельца |
 | D19 | 2026-11-26 | Единый конвейер пульта — MQTT, rosbridge — дополнительно | Консоль уже на MQTT; мост ROS↔MQTT даёт карту/логи/команды без переделки фронтенда |
 | D20 | 2026-11-26 | nginx `/rosbridge/` → `10.77.0.11:9090`, не localhost | rosbridge живёт на Тинкере; `127.0.0.1:9090` на VDS давал 502 |
+| D21 | 2026-11-26 | `rover_tf`: `odom→base_link` identity 20 Гц до энкодеров | Без TF SLAM не мог обработать ни один скан; честная заглушка, заменить на одометрию колёс |
+| D22 | 2026-11-26 | Карта в MQTT — только занятые ячейки (`occupied`) | Полный OccupancyGrid — сотни КБ JSON; индексы — ~0.6 КБ, пульту хватает |
+| D23 | 2026-11-27 | У `rover-lidar` нет `After=multi-user.target`, только `network.target` | Иначе цикл `agent → lidar → multi-user → agent`: systemd удалял старт агента при включении |
 
 ## Этап 3 (2026-11-26): ROS 2 + SLAM + Nav2 + пульт
 
@@ -216,10 +219,56 @@ Mechanic / Driver / Scout — функциональные шапки, см. AGE
   `/rosout` → `telemetry/log`; MQTT `rover/<node>/cmd/teleop` → ROS `/cmd_vel`.
 - Консоль: broadcast типов `map`/`log` по WebSocket; SLAM-карта рисуется на canvas
   поверх сканов; журнал показывает ROS-логи. На сайте — `/console/`.
-- `/odom` пока без источника (моторный base controller не подключён) — ожидаемые
-  таймауты TF `base_link → odom` в журнале Nav2.
+- `/odom` — заглушка identity из `rover_tf` (20 Гц); реальной одометрии колёс
+  нет до base controller. Nav2/SLAM работают, TF-цепочка полная.
 - Путь управления: джойстик → `/console/ws` → `rover/<node>/cmd/teleop` →
   `rover_bridge` → `/cmd_vel` (исполняющего моторного контроллера ещё нет).
+
+## Аудит 2026-11-26 (проверка соответствия пульта)
+
+Проверено на живой системе (MQTT, WebSocket, ROS). Найдены и исправлены
+дефекты, из-за которых «карта/логи» в пульте фактически не работали:
+
+| Что было | Причина | Исправление |
+|---|---|---|
+| `/scan` не публиковался вообще | `Header.stamp = …to_msg().stamp` — нет поля `stamp` | `stamp = …to_msg()` |
+| затем «no attribute intensity» | поле LaserScan — `intensities` (мн. ч.) | `msg.intensities` |
+| журнал забивался 20 ошибками/с | ошибка на каждом тике 20 Гц | публикация только нового скана (`ts`) + throttle ошибок 5 с |
+| карта не строилась | нет TF `odom→base_link`, SLAM искал `base_footprint` | новый `rover_tf`: `odom→base_link` 20 Гц, `base_link→{lidar, base_footprint}` static |
+| карта в пульте была точкой | `k = MAP_R/(RANGE_MM/2)` — px/м вместо px/мм | `ppm = MAP_R/(RANGE_MM/1000)`, координаты ячеек от `origin` |
+| журнал: XSS + рост DOM | `innerHTML` со строками ROS, без лимита | `textContent`, лимит 300 строк, история `/api/logs` |
+| дубли логов | одинаковые строки подряд | дедуп 5 с со счётчиком `×N` |
+| карта — сотни КБ JSON в MQTT | полный OccupancyGrid | только `occupied`-индексы (~0.6 КБ) |
+
+Проверка end-to-end после исправлений: `/scan` ~5.3 Гц; `/map` 52×54
+(93 занятых ячейки); MQTT `telemetry/{map,odom,log,lidar,system}` идут;
+WS-поток отдаёт `scan`, `map`, `pose`, `log`, `metric`; `/api/logs` — 200.
+
+Остаётся: `/odom` — identity (без энкодеров); в журнале Nav2 фоновые
+предупреждения `Keepout/SpeedFilter: Filter mask was not received`
+(фильтры Nav2 не настроены, на движение не влияют); нет панели
+lifecycle/целей Nav2 и клика по карте.
+
+## Холодная загрузка 2026-11-27 (агент не стартовал)
+
+Симптом: после включения Тинкера узел в пульте не появлялся.
+
+Причина: в `rover-lidar.service` стояло `After=multi-user.target`.
+Оба юнита (`rover-lidar`, `rover-agent`) — `WantedBy=multi-user.target`,
+а агент — `After=rover-lidar.service`; получался цикл
+`agent → lidar → multi-user → agent`. systemd писал
+`Found ordering cycle` и **удалял job `rover-agent.service/start`** —
+декодер работал, а телеметрия/сканы в MQTT не уходили.
+
+Исправление: `After=network.target` в `rover-lidar.service`
+(`deploy/node-agent/rover-lidar.service`), `daemon-reload`, перезагрузка.
+
+Проверка после реального `systemctl reboot`: `rover-lidar`, `rover-agent`,
+`rover_lidar_ros`, `rover_tf`, `nav2_bringup`, `rosbridge`, `rover_bridge` —
+все `active`; `systemctl --failed` — пусто; `scan.json` свежий;
+`/api/nodes`: `tinker online, lidar_hz 5.87, scan_age 0.0`;
+MQTT идут `lidar`, `map`, `odom`, `log`, `system`; в журнале загрузки
+цикла нет.
 
 ## Открытые вопросы
 

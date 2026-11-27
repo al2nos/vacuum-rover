@@ -17,7 +17,7 @@
       Писать сразу в форме ROS-ноды (rclpy → sensor_msgs/LaserScan),
       публикация в MQTT-консоль делается параллельно тем же сканом
 6. [x] Визуализация скана: простейший polar-plot / RViz2 / пульт
-7. [ ] Публикация sensor_msgs/LaserScan через rclpy
+7. [x] Публикация sensor_msgs/LaserScan через rclpy (нода `rover_lidar`, `/scan`)
 8. [ ] Разбор полётов: частота потерь пакетов, стабильность оборотов
 
 ## Этап 1 — второй лидар (Delta-2A)
@@ -32,26 +32,31 @@
 - [ ] Электрика: батарея → выключатель → BTS7960 + buck 5 В
 - [ ] Первый выезд: телеуправление (MQTT-пульт уже готов, см. ниже)
 
-## Этап 3 — ROS 2 Jazzy + Nav2 (автономия)
+## Этап 3 — ROS 2 Lyrical + Nav2 (автономия)
 
 Стек навигации — только бортовой, на Tinker Board 2. VDS его не
-крутит (380 МБ RAM) — сайт общается с ровером через rosbridge.
+крутит (380 МБ RAM) — сайт общается с ровером через мост MQTT и
+rosbridge.
 
-1. [ ] Tinker Board 2: Armbian Ubuntu 24.04 Server (образ tinkerboard-2,
-       ядро 6.12) → ROS 2 Jazzy из apt (arm64 Tier 1). Осторожно:
-       конфликт libzstd на свежем Noble — лечится даунгрейдом пакета
-2. [ ] Пакеты: ros-jazzy-ros-base, navigation2, slam-toolbox,
-       rosbridge-suite
+Факт: образ Ubuntu 26.04 (resolute), поэтому стоит **ROS 2 Lyrical**,
+а не Jazzy (решение D18). Тинкер — 6 ядер / 1.9 ГБ RAM.
+
+1. [x] ROS 2 Lyrical из apt (arm64) на текущем образе Ubuntu 26.04
+2. [x] Пакеты: ros-lyrical-ros-base, navigation2, slam-toolbox,
+       rosbridge-suite, nav2-bringup
 3. [ ] Дожим 2 ГБ RAM: zram/swap, ROS_LOCALHOST_ONLY=1, CycloneDDS
-4. [ ] Драйвер лидара как ROS-нода: UART Delta-2C PRO → LaserScan
+       (сейчас ~57 % RAM занято при работающем Nav2)
+4. [x] Драйвер лидара как ROS-нода: `/run/rover/scan.json` → `/scan`
+       (360 лучей, ~5–6 Гц; publication stamp из скана)
 5. [ ] Base controller: /cmd_vel (Twist) → GPIO/PWM BTS7960, watchdog
        0.5 с. Приоритет: автономка > MQTT-телеоп (cmd_vel перекрывает)
-6. [ ] URDF + статическая tf base_link→laser (после замеров башни)
-7. [ ] slam_toolbox: онлайн-карта → сохранение, разбор поведения
-8. [ ] VDS: nginx location /rosbridge/ → ws://10.77.0.11:9090
-       (WS-прокси к rosbridge на Тинкере, почти ноль RAM)
-9. [ ] Консоль: вкладка «Навигация» (roslibjs, рендер в браузере):
-       /map + /amcl_pose + /plan, клик по карте → /navigate_to_pose
+6. [x] TF-каркас `map→odom→base_link→{lidar, base_footprint}`
+       (`rover_tf`); смещения лидара — identity до замеров башни
+7. [x] slam_toolbox онлайн-карта → `/map` → `telemetry/map`
+       (компактно: только занятые ячейки)
+8. [x] VDS: nginx /rosbridge/ → ws://10.77.0.11:9090 (Upgrade → 101)
+9. [ ] Консоль: вкладка «Навигация»: клик по карте → цель Nav2,
+       `/plan`, состояния lifecycle; сейчас — карта/поза/логи/телеоп
 10. [ ] Прогоны: автономная езда по квартире, сбор проблем
 
 Риск: Nav2 + SLAM + декодер на 2 ГБ — впритык. План Б: Nav2 перенести
