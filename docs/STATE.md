@@ -300,6 +300,33 @@ UART на 40-pin Tinker Board 2:
 TF `base_link→lidar2` остаётся identity, поэтому в costmap Nav2/SLAM
 `/scan2` пока не подмешивается. Пульт показывает его как отдельный слой.
 
+## Этап: второй модуль — Orange Pi 3 LTS (2026-11-27, подготовка)
+
+Цель этапа: вынести второй лидар (Delta-2C PRO) и/или шлюз телеметрии с
+Tinker Board 2 на отдельный модуль **Orange Pi 3 LTS** (RK3399, как и Тинкер,
+A72+A53), чтобы распределить нагрузку и получить второй вычислитель в флоте.
+
+Планы (см. `deploy/site.json` + `docs/architecture.md`):
+
+1. **OP3 — второй лидар:** lidar_delta + rover-agent на OP3, второй лидар
+   подключается к UART OP3; агент публикует в MQTT как новый узел
+   (`rover/<node>/telemetry/lidar2`). Декодер — `deploy/node-agent/lidar_delta.py`.
+2. **OP3 — шлюз:** телеуправление, видеострим, дашборд (см. site.json,
+   `10.77.0.12`, state `waiting` — «ожидает подключение к проекту»).
+3. **WireGuard:** peer `orangepil3 → 10.77.0.12` уже описан
+   (`deploy/site.json`, `/usr/local/bin/make-peer.sh` на VDS).
+
+Deployment-артефакты для модуля:
+
+- `deploy/node-agent/rover-lidar-opos3.service` — юнит декодера на OP3
+  (аналог `rover-lidar2.service`: UART → `/run/rover/scan2.json` → agent).
+
+Ограничения/отложения:
+
+- Мотор 2C (PWM+PID ~7 Гц) — пока не решён (Tinker: busy/exc, без диода).
+  Если лидар переедет на OP3 — там тот же RK3399, решение переносится.
+- Слияние `/scan` + `/scan2` в costmap Nav2 — после замера TF.
+
 ## Холодная загрузка 2026-11-27 (агент не стартовал)
 
 Симптом: после включения Тинкера узел в пульте не появлялся.
