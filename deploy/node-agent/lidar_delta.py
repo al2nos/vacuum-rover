@@ -9,8 +9,11 @@
   * версия 0x01 (Delta-2A/2B/2D/2G): start_angle, шаг 360/(16·N);
   * версия 0x11/0x13 (Delta-2C PRO): start_angle + end_angle, интерполяция.
 
-0xAE (только скорость) — лидар вне окна измерений (мотор слишком быстрый):
-такие кадры дают rpm, но не точки. Норма — 0xAD с точками при ~6–7 Гц.
+0xAE (только скорость) — лидар вне окна измерений: у Delta-2C PRO нет
+внутренней стабилизации оборотов, мотор нужно крутить ШИМ с PID на ~7 Гц
+(референс: kaiaai/LDS, `LDS_DELTA_2C_115200`, pwm 0.6 + PID). Постоянное
+напряжение даёт «сколько получится»: 3.3 В → ~9.3 Гц → только 0xAE,
+измерений нет. Норма — 0xAD с точками при ~7 Гц.
 """
 import json
 import os
@@ -23,7 +26,10 @@ BAUD = int(os.environ.get("ROVER_LIDAR_BAUD", "115200"))
 SCAN_FILE = os.environ.get("ROVER_SCAN_FILE", "/run/rover/scan.json")
 STATS_FILE = os.environ.get("ROVER_LIDAR_STATS", "/run/rover/lidar_stats.json")
 BINS = 360
-MAX_FRAME = 8 + 7 + 28 * 3 + 2  # запас под кадр 2C
+# Кадр Delta-2C: 8 байт заголовка + 7 (freq/off/start/end) + до 40 отсчётов
+# по 3 байта + CRC. У 2A было 28 отсчётов, у 2C встречается до 29 и больше,
+# поэтому старый лимит 95 байт резал валидные кадры 2C.
+MAX_FRAME = 8 + 7 + 40 * 3 + 2
 
 
 def log(msg):
